@@ -175,6 +175,9 @@ struct gomokuTests {
         #expect(newGame.winningLine != nil)
         #expect(newGame.winningLine?.startRow == 5)
         #expect(newGame.winningLine?.startCol == 0)
+        #expect(newGame.winningLine?.endRow == 5)
+        #expect(newGame.winningLine?.endCol == 4)
+        #expect(newGame.winningLine?.player == Player.black)
     }
 
 }
