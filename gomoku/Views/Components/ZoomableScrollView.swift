@@ -88,9 +88,20 @@ struct ZoomableScrollView<Content: View>: UIViewRepresentable {
 
         if context.coordinator.lastRecenterToken != recenterToken {
             context.coordinator.lastRecenterToken = recenterToken
-            context.coordinator.centerContent(in: scrollView, forceOffset: true)
-        } else {
-            context.coordinator.centerContent(in: scrollView, forceOffset: false)
+            context.coordinator.pendingForcedCenter = true
+        }
+
+        let hasValidLayout =
+            scrollView.bounds.width > 0
+            && scrollView.bounds.height > 0
+            && contentSize.width > 0
+            && contentSize.height > 0
+        let shouldForceCenter = context.coordinator.pendingForcedCenter && hasValidLayout
+
+        context.coordinator.centerContent(in: scrollView, forceOffset: shouldForceCenter)
+
+        if shouldForceCenter {
+            context.coordinator.pendingForcedCenter = false
         }
     }
 
@@ -102,6 +113,7 @@ struct ZoomableScrollView<Content: View>: UIViewRepresentable {
         var heightConstraint: NSLayoutConstraint?
         var lastRecenterToken: Int = -1
         var lastBaseSize: CGSize = .zero
+        var pendingForcedCenter: Bool = true
 
         init(_ parent: ZoomableScrollView) {
             self.parent = parent

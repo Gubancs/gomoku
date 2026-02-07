@@ -4,6 +4,7 @@ import SwiftUI
 struct BoardCellsView: View {
     let board: [[Player?]]
     let cellSize: CGFloat
+    let stoneScale: CGFloat
     let lastMove: LastMove?
     let onTap: (Int, Int) -> Void
 
@@ -16,6 +17,7 @@ struct BoardCellsView: View {
                         BoardCellView(
                             player: board[row][col],
                             size: cellSize,
+                            stoneScale: stoneScale,
                             isLastMove: isLastMove,
                             onTap: { onTap(row, col) }
                         )

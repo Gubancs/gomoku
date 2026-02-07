@@ -5,7 +5,7 @@ enum SoundEffects {
     private static let moveSound: SystemSoundID = 1104
     private static var isPrepared = false
 
-    static func playMove(for player: Player) {
+    static func playMove(for _: Player) {
         AudioServicesPlaySystemSound(moveSound)
     }
 

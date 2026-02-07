@@ -2,18 +2,26 @@ import SwiftUI
 
 /// Renders a single board cell and its optional stone.
 struct BoardCellView: View {
+    @Environment(\.colorScheme)
+    private var colorScheme
+
     let player: Player?
     let size: CGFloat
+    let stoneScale: CGFloat
     let isLastMove: Bool
     let onTap: () -> Void
 
     var body: some View {
         ZStack {
-            Rectangle().fill(Color.white)
+            Rectangle().fill(
+                colorScheme == .dark
+                    ? Color(red: 0.17, green: 0.27, blue: 0.40).opacity(0.74)
+                    : Color.white
+            )
 
             if let player {
                 StoneView(player: player)
-                    .frame(width: size * 0.8, height: size * 0.8)
+                    .frame(width: size * stoneScale, height: size * stoneScale)
             }
 
             if isLastMove {

@@ -2,25 +2,40 @@ import SwiftUI
 
 /// Renders the full Gomoku board with tappable cells and a simple grid overlay.
 struct BoardView: View {
+    @Environment(\.colorScheme)
+    private var colorScheme
+
+    @AppStorage(StoneSizeConfiguration.storageKey)
+    private var stoneSizeOptionRawValue: String = StoneSizeConfiguration.defaultOption.rawValue
+
     @ObservedObject var game: GomokuGame
     let cellSize: CGFloat
     var isInteractionEnabled: Bool = true
     var onCellTap: ((Int, Int) -> Void)? = nil
+    var boardOverride: [[Player?]]? = nil
+    var lastMoveOverride: LastMove? = nil
 
     var body: some View {
-        let boardSize = GomokuGame.boardSize
+        let board = boardOverride ?? game.board
+        let boardSize = board.count
         let size = cellSize * CGFloat(boardSize)
+        let lastMove = lastMoveOverride ?? game.lastMove
         let tapHandler = onCellTap ?? { row, col in
             game.placeStone(row: row, col: col)
         }
+        let stoneScale = StoneSizeOption(rawValue: stoneSizeOptionRawValue)?.scale
+            ?? StoneSizeConfiguration.defaultOption.scale
 
         ZStack {
-            Color.white
+            (colorScheme == .dark
+                ? Color(red: 0.10, green: 0.18, blue: 0.28).opacity(0.46)
+                : Color.white)
 
             BoardCellsView(
-                board: game.board,
+                board: board,
                 cellSize: cellSize,
-                lastMove: game.lastMove,
+                stoneScale: stoneScale,
+                lastMove: lastMove,
                 onTap: tapHandler
             )
             .allowsHitTesting(isInteractionEnabled)

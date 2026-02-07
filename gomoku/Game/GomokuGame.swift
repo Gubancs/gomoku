@@ -23,12 +23,15 @@ struct Move: Identifiable, Equatable {
     let player: Player
 }
 
-/// Core game logic and board state for Gomoku.
+/// Coordinates the Gomoku board state and applies the rules engine.
 final class GomokuGame: ObservableObject {
     static let boardSize = 30
     static let winLength = 5
 
     let moveTimeLimit: TimeInterval
+
+    private let boardModel: GomokuBoard
+    private let rules: GomokuRules
 
     @Published private(set) var board: [[Player?]]
     @Published private(set) var moves: [Move]
@@ -39,11 +42,10 @@ final class GomokuGame: ObservableObject {
 
     /// Creates a fresh game with an empty board.
     init(moveTimeLimit: TimeInterval = 50) {
+        self.boardModel = GomokuBoard(size: Self.boardSize)
+        self.rules = GomokuRules(winLength: Self.winLength)
         self.moveTimeLimit = moveTimeLimit
-        self.board = Array(
-            repeating: Array(repeating: nil, count: Self.boardSize),
-            count: Self.boardSize
-        )
+        self.board = boardModel.grid
         self.moves = []
         self.currentPlayer = .black
         self.winner = nil
@@ -53,10 +55,8 @@ final class GomokuGame: ObservableObject {
 
     /// Clears the board and resets turn and outcome state.
     func reset() {
-        board = Array(
-            repeating: Array(repeating: nil, count: Self.boardSize),
-            count: Self.boardSize
-        )
+        boardModel.reset()
+        syncBoardFromModel()
         moves = []
         currentPlayer = .black
         winner = nil
@@ -67,7 +67,8 @@ final class GomokuGame: ObservableObject {
     /// Removes the last move and restores the previous player.
     func undoLastMove() {
         guard let last = moves.last else { return }
-        board[last.row][last.col] = nil
+        boardModel.clear(row: last.row, col: last.col)
+        syncBoardFromModel()
         moves.removeLast()
         winner = nil
         isDraw = false
@@ -78,20 +79,19 @@ final class GomokuGame: ObservableObject {
     /// Places a stone for the current player if the move is valid.
     func placeStone(row: Int, col: Int) {
         guard winner == nil, !isDraw else { return }
-        guard board.indices.contains(row), board[row].indices.contains(col) else { return }
-        guard board[row][col] == nil else { return }
-        guard !hasAnyStone() || hasAdjacentStone(row: row, col: col) else { return }
+        guard rules.isValidMove(on: boardModel, row: row, col: col) else { return }
 
-        board[row][col] = currentPlayer
+        boardModel.place(player: currentPlayer, row: row, col: col)
+        syncBoardFromModel()
         moves.append(Move(row: row, col: col, player: currentPlayer))
         lastMove = LastMove(row: row, col: col, player: currentPlayer)
 
-        if checkWin(fromRow: row, col: col, player: currentPlayer) {
+        if rules.isWinningMove(on: boardModel, row: row, col: col, player: currentPlayer) {
             winner = currentPlayer
             return
         }
 
-        if isBoardFull() {
+        if boardModel.isFull() {
             isDraw = true
             return
         }
@@ -124,7 +124,8 @@ final class GomokuGame: ObservableObject {
 
     /// Applies a turn-based snapshot to the local game.
     func apply(state: GameState) {
-        board = state.board
+        boardModel.replace(with: state.board)
+        syncBoardFromModel()
         currentPlayer = state.currentPlayer
         winner = state.winner
         isDraw = state.isDraw
@@ -132,76 +133,8 @@ final class GomokuGame: ObservableObject {
         moves = []
     }
 
-    /// Checks whether the most recent move created a win.
-    private func checkWin(fromRow row: Int, col: Int, player: Player) -> Bool {
-        let directions = [
-            (1, 0),   // vertical
-            (0, 1),   // horizontal
-            (1, 1),   // diagonal down-right
-            (1, -1)   // diagonal down-left
-        ]
-
-        for direction in directions {
-            let count = 1
-                + countDirection(row: row, col: col, player: player, dRow: direction.0, dCol: direction.1)
-                + countDirection(row: row, col: col, player: player, dRow: -direction.0, dCol: -direction.1)
-            if count >= Self.winLength {
-                return true
-            }
-        }
-        return false
-    }
-
-    /// Counts consecutive stones in a given direction.
-    private func countDirection(row: Int, col: Int, player: Player, dRow: Int, dCol: Int) -> Int {
-        var r = row + dRow
-        var c = col + dCol
-        var count = 0
-
-        while r >= 0, r < Self.boardSize, c >= 0, c < Self.boardSize {
-            if board[r][c] == player {
-                count += 1
-                r += dRow
-                c += dCol
-            } else {
-                break
-            }
-        }
-
-        return count
-    }
-
-    private func isBoardFull() -> Bool {
-        board.allSatisfy { row in
-            row.allSatisfy { $0 != nil }
-        }
-    }
-
-    /// Returns true when there is at least one stone already on the board.
-    private func hasAnyStone() -> Bool {
-        board.contains { row in
-            row.contains { $0 != nil }
-        }
-    }
-
-    /// Returns true when the candidate cell touches an existing stone in 8 directions.
-    private func hasAdjacentStone(row: Int, col: Int) -> Bool {
-        for dRow in -1...1 {
-            for dCol in -1...1 {
-                if dRow == 0, dCol == 0 { continue }
-
-                let nextRow = row + dRow
-                let nextCol = col + dCol
-                guard board.indices.contains(nextRow),
-                      board[nextRow].indices.contains(nextCol) else {
-                    continue
-                }
-
-                if board[nextRow][nextCol] != nil {
-                    return true
-                }
-            }
-        }
-        return false
+    /// Keeps the published board in sync with the board model.
+    private func syncBoardFromModel() {
+        board = boardModel.grid
     }
 }

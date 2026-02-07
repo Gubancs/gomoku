@@ -2,6 +2,9 @@ import SwiftUI
 
 /// Draws the interior grid lines for the board.
 struct BoardGridView: View {
+    @Environment(\.colorScheme)
+    private var colorScheme
+
     let boardSize: Int
     let cellSize: CGFloat
 
@@ -18,6 +21,11 @@ struct BoardGridView: View {
                 path.addLine(to: CGPoint(x: offset, y: size))
             }
         }
-        .stroke(Color.gray.opacity(0.35), lineWidth: 1)
+        .stroke(
+            colorScheme == .dark
+                ? Color(red: 0.74, green: 0.84, blue: 0.96).opacity(0.34)
+                : Color.gray.opacity(0.35),
+            lineWidth: 1
+        )
     }
 }

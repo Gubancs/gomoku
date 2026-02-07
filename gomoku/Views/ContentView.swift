@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var gameCenter: GameCenterManager
+    @StateObject private var offlinePlayers = OfflinePlayersStore()
 
     var body: some View {
         ZStack {
@@ -13,6 +14,7 @@ struct ContentView: View {
                 LoginScreenView()
             }
         }
+        .environmentObject(offlinePlayers)
         .onAppear {
             gameCenter.refreshAuthenticationState()
         }
@@ -22,6 +24,7 @@ struct ContentView: View {
                     .navigationBarTitleDisplayMode(.inline)
             }
             .environmentObject(gameCenter)
+            .environmentObject(offlinePlayers)
         }
     }
 

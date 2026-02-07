@@ -51,7 +51,7 @@ struct MoveTimerView: View {
                     .shadow(color: ringColor.opacity(isCritical ? 0.5 : 0.2), radius: isCritical ? 6 : 3)
 
                 Text(timeString)
-                    .font(.system(size: size * 0.34, weight: .semibold, design: .rounded))
+                    .font(.system(size: size * 0.42, weight: .semibold, design: .rounded))
                     .foregroundStyle(ringColor)
             }
             .frame(width: size, height: size)
