@@ -42,6 +42,16 @@ struct BoardView: View {
 
             BoardGridView(boardSize: boardSize, cellSize: cellSize)
                 .allowsHitTesting(false)
+            
+            // Draw winning line overlay
+            if let winningLine = game.winningLine {
+                WinningLineView(
+                    winningLine: winningLine,
+                    cellSize: cellSize,
+                    boardSize: boardSize
+                )
+                .allowsHitTesting(false)
+            }
         }
         .frame(width: size, height: size)
     }

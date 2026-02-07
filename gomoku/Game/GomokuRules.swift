@@ -1,5 +1,14 @@
 import Foundation
 
+/// Represents a winning line of stones.
+struct WinningLine: Codable, Equatable {
+    let startRow: Int
+    let startCol: Int
+    let endRow: Int
+    let endCol: Int
+    let player: Player
+}
+
 /// Encapsulates the rules for validating moves and detecting wins.
 final class GomokuRules {
     private let winLength: Int
@@ -35,6 +44,40 @@ final class GomokuRules {
             }
         }
         return false
+    }
+    
+    /// Detects and returns the winning line coordinates when a move completes a winning sequence.
+    /// Returns nil if the move does not result in a win.
+    func detectWinningLine(on board: GomokuBoard, row: Int, col: Int, player: Player) -> WinningLine? {
+        let directions = [
+            (1, 0),   // vertical
+            (0, 1),   // horizontal
+            (1, 1),   // diagonal down-right
+            (1, -1)   // diagonal down-left
+        ]
+
+        for direction in directions {
+            let forwardCount = countDirection(on: board, row: row, col: col, player: player, dRow: direction.0, dCol: direction.1)
+            let backwardCount = countDirection(on: board, row: row, col: col, player: player, dRow: -direction.0, dCol: -direction.1)
+            let totalCount = 1 + forwardCount + backwardCount
+            
+            if totalCount >= winLength {
+                // Find the start and end positions of the winning line
+                let startRow = row - backwardCount * direction.0
+                let startCol = col - backwardCount * direction.1
+                let endRow = row + forwardCount * direction.0
+                let endCol = col + forwardCount * direction.1
+                
+                return WinningLine(
+                    startRow: startRow,
+                    startCol: startCol,
+                    endRow: endRow,
+                    endCol: endCol,
+                    player: player
+                )
+            }
+        }
+        return nil
     }
 
     /// Counts consecutive stones in a given direction.

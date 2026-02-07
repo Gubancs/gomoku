@@ -14,6 +14,7 @@ struct GameState: Codable {
     let winner: Player?
     let isDraw: Bool
     let lastMove: LastMove?
+    let winningLine: WinningLine?
 
     func encoded() -> Data? {
         try? JSONEncoder().encode(self)

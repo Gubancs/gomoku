@@ -39,6 +39,7 @@ final class GomokuGame: ObservableObject {
     @Published private(set) var winner: Player?
     @Published private(set) var isDraw: Bool
     @Published private(set) var lastMove: LastMove?
+    @Published private(set) var winningLine: WinningLine?
 
     /// Creates a fresh game with an empty board.
     init(moveTimeLimit: TimeInterval = 50) {
@@ -51,6 +52,7 @@ final class GomokuGame: ObservableObject {
         self.winner = nil
         self.isDraw = false
         self.lastMove = nil
+        self.winningLine = nil
     }
 
     /// Clears the board and resets turn and outcome state.
@@ -62,6 +64,7 @@ final class GomokuGame: ObservableObject {
         winner = nil
         isDraw = false
         lastMove = nil
+        winningLine = nil
     }
 
     /// Removes the last move and restores the previous player.
@@ -72,6 +75,7 @@ final class GomokuGame: ObservableObject {
         moves.removeLast()
         winner = nil
         isDraw = false
+        winningLine = nil
         currentPlayer = last.player
         lastMove = moves.last.map { LastMove(row: $0.row, col: $0.col, player: $0.player) }
     }
@@ -88,6 +92,7 @@ final class GomokuGame: ObservableObject {
 
         if rules.isWinningMove(on: boardModel, row: row, col: col, player: currentPlayer) {
             winner = currentPlayer
+            winningLine = rules.detectWinningLine(on: boardModel, row: row, col: col, player: currentPlayer)
             return
         }
 
@@ -118,7 +123,8 @@ final class GomokuGame: ObservableObject {
             currentPlayer: currentPlayer,
             winner: winner,
             isDraw: isDraw,
-            lastMove: lastMove
+            lastMove: lastMove,
+            winningLine: winningLine
         )
     }
 
@@ -130,6 +136,7 @@ final class GomokuGame: ObservableObject {
         winner = state.winner
         isDraw = state.isDraw
         lastMove = state.lastMove
+        winningLine = state.winningLine
         moves = []
     }
 
