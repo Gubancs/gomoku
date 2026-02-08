@@ -1,5 +1,6 @@
 internal import GameKit
 import SwiftUI
+import UIKit
 
 /// Dedicated screen for Game Center dashboard and matchmaking.
 struct OnlineScreenView: View {
@@ -8,8 +9,10 @@ struct OnlineScreenView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var isOfflineSetupPresented: Bool = false
     @State private var isJoinPartyPresented: Bool = false
+    @State private var isLeaderboardsPresented: Bool = false
     @State private var joinPartyCode: String = ""
     @State private var presenceCount: Int?
+    @FocusState private var isJoinCodeFieldFocused: Bool
 
     var body: some View {
         ZStack {
@@ -18,18 +21,19 @@ struct OnlineScreenView: View {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 22) {
                     header
+                    partyCodeBanner
 
                     OnlineDashboardView(
                         gameCenter: gameCenter,
                         onStartMatch: gameCenter.startMatchmaking,
+                        onOpenLeaderboards: {
+                            isLeaderboardsPresented = true
+                        },
                         onStartPartyHost: {
                             gameCenter.startPartyHostMatchmaking()
                         },
                         onStartPartyJoin: {
                             isJoinPartyPresented = true
-                        },
-                        onStartMatchmakerUI: {
-                            gameCenter.presentMatchmakerUI()
                         },
                         onStartOfflineMatch: {
                             isOfflineSetupPresented = true
@@ -80,41 +84,20 @@ struct OnlineScreenView: View {
         }
         .sheet(isPresented: $isJoinPartyPresented) {
             NavigationStack {
-                VStack(spacing: 14) {
-                    Text("Join by Code")
-                        .font(.headline)
-                    TextField("Enter code", text: $joinPartyCode)
-                        .textCase(.uppercase)
-                        .textInputAutocapitalization(.characters)
-                        .disableAutocorrection(true)
-                        .multilineTextAlignment(.center)
-                        .padding()
-                        .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    if let partyError = gameCenter.partyError, !partyError.isEmpty {
-                        Text(partyError)
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                            .multilineTextAlignment(.center)
-                    }
-                    Button("Join") {
-                        isJoinPartyPresented = false
-                        gameCenter.startPartyJoinMatchmaking(code: joinPartyCode)
-                        joinPartyCode = ""
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(joinPartyCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    Button("Cancel", role: .cancel) {
-                        isJoinPartyPresented = false
-                        joinPartyCode = ""
-                    }
-                    .buttonStyle(.bordered)
-                }
-                .padding()
+                joinByCodeSheet
             }
-            .presentationDetents([.height(260)])
+            .presentationDetents([.height(420)])
+            .presentationDragIndicator(.visible)
+            .onAppear {
+                isJoinCodeFieldFocused = true
+            }
+        }
+        .navigationDestination(isPresented: $isLeaderboardsPresented) {
+            LeaderboardsView(gameCenter: gameCenter)
         }
         .task {
             await refreshPresence()
+            startPresenceAutoRefresh()
         }
     }
 
@@ -123,6 +106,13 @@ struct OnlineScreenView: View {
             return "Online: \(presenceCount)"
         }
         return "Online"
+    }
+
+    private func startPresenceAutoRefresh() {
+        // Poll every 20 seconds while view is alive.
+        Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { _ in
+            Task { await refreshPresence() }
+        }
     }
 
     @Sendable private func refreshPresence() async {
@@ -134,6 +124,156 @@ struct OnlineScreenView: View {
 
     private var header: some View {
         EmptyView()
+    }
+
+    private var joinByCodeSheet: some View {
+        ZStack {
+            RadialGradient(
+                colors: colorScheme == .dark
+                    ? [
+                        Color(red: 0.10, green: 0.16, blue: 0.30),
+                        Color(red: 0.16, green: 0.20, blue: 0.30)
+                    ]
+                    : [
+                        Color(red: 0.93, green: 0.97, blue: 1.0),
+                        Color(red: 0.84, green: 0.92, blue: 1.0)
+                    ],
+                center: .top,
+                startRadius: 80,
+                endRadius: 560
+            )
+            .ignoresSafeArea()
+
+            VStack(spacing: 16) {
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 0.26, green: 0.50, blue: 0.88),
+                                    Color(red: 0.20, green: 0.40, blue: 0.78)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                    Image(systemName: "person.2.badge.plus")
+                        .font(.system(size: 24, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+                .frame(width: 56, height: 56)
+                .shadow(color: Color.black.opacity(0.2), radius: 8, x: 0, y: 6)
+
+                Text("Join by Party Code")
+                    .font(.title3.weight(.bold))
+
+                Text("Ask your friend for their 4-character code and paste it below.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 10)
+
+                VStack(spacing: 10) {
+                    TextField("AB12", text: $joinPartyCode)
+                        .focused($isJoinCodeFieldFocused)
+                        .font(.system(size: 28, weight: .bold, design: .monospaced))
+                        .tracking(3)
+                        .textInputAutocapitalization(.characters)
+                        .disableAutocorrection(true)
+                        .multilineTextAlignment(.center)
+                        .onChange(of: joinPartyCode) { newValue in
+                            joinPartyCode = normalizedJoinCode(newValue)
+                        }
+                        .padding(.vertical, 12)
+                        .padding(.horizontal, 14)
+                        .background(Color.white.opacity(colorScheme == .dark ? 0.12 : 0.8), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(Color.black.opacity(0.08), lineWidth: 1)
+                        )
+
+                    if let partyError = gameCenter.partyError, !partyError.isEmpty {
+                        HStack(spacing: 6) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                            Text(partyError)
+                                .multilineTextAlignment(.leading)
+                        }
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(Color.red.opacity(colorScheme == .dark ? 0.15 : 0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+                }
+
+                HStack(spacing: 10) {
+                    Button("Cancel", role: .cancel) {
+                        isJoinPartyPresented = false
+                        joinPartyCode = ""
+                    }
+                    .buttonStyle(.bordered)
+                    .frame(maxWidth: .infinity)
+
+                    Button("Join") {
+                        isJoinPartyPresented = false
+                        gameCenter.startPartyJoinMatchmaking(code: joinPartyCode)
+                        joinPartyCode = ""
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color(red: 0.26, green: 0.50, blue: 0.88))
+                    .disabled(joinPartyCode.trimmingCharacters(in: .whitespacesAndNewlines).count != 4)
+                    .frame(maxWidth: .infinity)
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 18)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .stroke(Color.black.opacity(0.08), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.12), radius: 16, x: 0, y: 8)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 16)
+        }
+    }
+
+    @ViewBuilder
+    private var partyCodeBanner: some View {
+        if let code = gameCenter.partyCode, !code.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Party Code")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 10) {
+                    Text(code)
+                        .font(.system(size: 24, weight: .bold, design: .monospaced))
+                        .tracking(2)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+
+                    Spacer(minLength: 0)
+
+                    Button {
+                        UIPasteboard.general.string = code
+                    } label: {
+                        Label("Copy", systemImage: "doc.on.doc")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(Color.black.opacity(0.08), lineWidth: 1)
+            )
+        }
     }
 
     private var background: some View {
@@ -172,6 +312,18 @@ struct OnlineScreenView: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
 
+                if let code = gameCenter.partyCode, !code.isEmpty {
+                    VStack(spacing: 6) {
+                        Text("Share this party code:")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(code)
+                            .font(.system(size: 28, weight: .bold, design: .monospaced))
+                            .tracking(3)
+                    }
+                    .padding(.top, 2)
+                }
+
 #if DEBUG
                 if !matchmakingDebugLines.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
@@ -184,11 +336,9 @@ struct OnlineScreenView: View {
                         Text("App ID: \(gameCenter.appIdentifierPrefix)")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
-                        if let code = gameCenter.partyCode {
-                            Text("Party code: \(code)")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
+                        Text("Restricted: \(gameCenter.isMultiplayerRestricted ? "yes" : "no") / Underage: \(gameCenter.isUnderage ? "yes" : "no")")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                         ForEach(matchmakingDebugLines, id: \.self) { line in
                             Text(line)
                                 .font(.caption2)
@@ -275,6 +425,14 @@ struct OnlineScreenView: View {
         }
     }
 #endif
+
+    private func normalizedJoinCode(_ value: String) -> String {
+        let allowed = CharacterSet(charactersIn: "ABCDEFGHJKLMNPQRSTUVWXYZ23456789")
+        let upper = value.uppercased()
+        let filteredScalars = upper.unicodeScalars.filter { allowed.contains($0) }
+        let filtered = String(String.UnicodeScalarView(filteredScalars))
+        return String(filtered.prefix(4))
+    }
 }
 
 #Preview {

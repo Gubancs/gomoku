@@ -14,7 +14,6 @@ extension GameCenterManager {
             return
         }
 
-        headToHeadSummary = nil
         let targetMatchID = match.matchID
         let store = headToHeadStore
 

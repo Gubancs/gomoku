@@ -3,6 +3,7 @@ import SwiftUI
 
 /// Summary row for a turn-based match.
 struct MatchRowView: View {
+    @Environment(\.colorScheme) private var colorScheme
     let match: GKTurnBasedMatch
     private let surfacePrimaryText = Color(red: 0.12, green: 0.13, blue: 0.16)
     private let surfaceSecondaryText = Color(red: 0.32, green: 0.34, blue: 0.38)
@@ -16,14 +17,14 @@ struct MatchRowView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(matchTitle)
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(surfacePrimaryText)
+                    .foregroundStyle(primaryText)
                 Text(statusText)
                     .font(.caption)
-                    .foregroundStyle(surfaceSecondaryText)
+                    .foregroundStyle(secondaryText)
 #if DEBUG
                 Text("ID: \(match.matchID)")
                     .font(.caption2)
-                    .foregroundStyle(surfaceSecondaryText)
+                    .foregroundStyle(secondaryText)
                     .lineLimit(1)
                     .truncationMode(.middle)
 #endif
@@ -34,18 +35,21 @@ struct MatchRowView: View {
             if isMyTurn {
                 Text("Your turn")
                     .font(.caption)
-                    .foregroundStyle(surfacePrimaryText)
+                    .foregroundStyle(primaryText)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .background(Color.black.opacity(0.08), in: Capsule())
+                    .background(turnBadgeBackground, in: Capsule())
             }
         }
         .padding(.vertical, 10)
         .padding(.horizontal, 12)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(rowBackground)
+        )
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.black.opacity(0.08), lineWidth: 1)
+                .stroke(rowBorder, lineWidth: 1)
         )
     }
 
@@ -87,5 +91,31 @@ struct MatchRowView: View {
         default:
             return Color.blue.opacity(0.7)
         }
+    }
+
+    private var primaryText: Color {
+        colorScheme == .dark
+            ? Color(red: 0.90, green: 0.93, blue: 0.98)
+            : surfacePrimaryText
+    }
+
+    private var secondaryText: Color {
+        colorScheme == .dark
+            ? Color(red: 0.72, green: 0.79, blue: 0.90)
+            : surfaceSecondaryText
+    }
+
+    private var rowBackground: Color {
+        colorScheme == .dark
+            ? Color(red: 0.18, green: 0.23, blue: 0.30)
+            : Color(red: 0.96, green: 0.98, blue: 1.0)
+    }
+
+    private var rowBorder: Color {
+        colorScheme == .dark ? Color.white.opacity(0.14) : Color.black.opacity(0.08)
+    }
+
+    private var turnBadgeBackground: Color {
+        colorScheme == .dark ? Color.white.opacity(0.16) : Color.black.opacity(0.08)
     }
 }

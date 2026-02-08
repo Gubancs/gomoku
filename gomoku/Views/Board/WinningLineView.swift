@@ -22,8 +22,8 @@ struct WinningLineView: View {
                 path.move(to: CGPoint(x: startX, y: startY))
                 path.addLine(to: CGPoint(x: endX, y: endY))
             }
-            .stroke(lineColor, style: StrokeStyle(lineWidth: cellSize * 0.15, lineCap: .round))
-            .shadow(color: lineColor.opacity(0.5), radius: cellSize * 0.2)
+            .stroke(lineColor, style: StrokeStyle(lineWidth: cellSize * 0.12, lineCap: .round))
+            .shadow(color: lineColor.opacity(0.5), radius: cellSize * 0.16)
         }
     }
     

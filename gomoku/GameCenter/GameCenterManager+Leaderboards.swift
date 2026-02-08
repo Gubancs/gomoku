@@ -2,19 +2,67 @@ import Foundation
 @preconcurrency internal import GameKit
 import UIKit
 
+enum LeaderboardAudienceScope: String, CaseIterable, Identifiable {
+    case global
+    case friends
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .global: return "Global"
+        case .friends: return "Friends"
+        }
+    }
+
+    var playerScope: GKLeaderboard.PlayerScope {
+        switch self {
+        case .global: return .global
+        case .friends: return .friendsOnly
+        }
+    }
+}
+
+enum LeaderboardTimeRange: String, CaseIterable, Identifiable {
+    case today
+    case week
+    case allTime
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .today: return "Today"
+        case .week: return "Week"
+        case .allTime: return "All Time"
+        }
+    }
+
+    var timeScope: GKLeaderboard.TimeScope {
+        switch self {
+        case .today: return .today
+        case .week: return .week
+        case .allTime: return .allTime
+        }
+    }
+}
+
+struct LeaderboardPlayerRow: Identifiable {
+    let id: String
+    let rank: Int
+    let score: Int
+    let player: GKPlayer
+    let displayName: String
+    let isLocal: Bool
+}
+
 extension GameCenterManager {
     func refreshLeaderboard() {
         guard isAuthenticated else { return }
-        GKLeaderboard.loadLeaderboards(IDs: [leaderboardID]) { [weak self] leaderboards, error in
-            let boxedLeaderboards = UncheckedSendable(value: leaderboards)
-            let errorDescription = error?.localizedDescription
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                if let errorDescription {
-                    self.lastError = errorDescription
-                    return
-                }
-                guard let leaderboard = boxedLeaderboards.value?.first else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let leaderboard = try await self.loadPrimaryLeaderboard()
                 self.leaderboardTitle = leaderboard.title
                 leaderboard.loadEntries(for: [GKLocalPlayer.local], timeScope: .allTime) { localEntry, _, error in
                     let score = localEntry?.score
@@ -32,6 +80,8 @@ extension GameCenterManager {
                         self.playerRank = rank
                     }
                 }
+            } catch {
+                self.lastError = error.localizedDescription
             }
         }
     }
@@ -126,9 +176,110 @@ extension GameCenterManager {
         processedMatchIDs = processed
         submitScore(newRating)
     }
+
+    func loadLeaderboardRows(
+        audience: LeaderboardAudienceScope,
+        timeRange: LeaderboardTimeRange,
+        limit: Int = 50
+    ) async throws -> [LeaderboardPlayerRow] {
+        guard isAuthenticated else { return [] }
+        let leaderboard = try await loadPrimaryLeaderboard()
+        let entries = try await loadEntries(
+            from: leaderboard,
+            audience: audience,
+            timeRange: timeRange,
+            limit: limit
+        )
+
+        return entries.map { entry in
+            let player = entry.player
+            return LeaderboardPlayerRow(
+                id: player.gamePlayerID,
+                rank: entry.rank,
+                score: Int(entry.score),
+                player: player,
+                displayName: player.displayName,
+                isLocal: player.gamePlayerID == GKLocalPlayer.local.gamePlayerID
+            )
+        }
+    }
 }
 
 private extension GameCenterManager {
+    func loadLeaderboards(ids: [String]?) async throws -> [GKLeaderboard] {
+        try await withCheckedThrowingContinuation { continuation in
+            GKLeaderboard.loadLeaderboards(IDs: ids) { leaderboards, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                continuation.resume(returning: leaderboards ?? [])
+            }
+        }
+    }
+
+    func leaderboardIdentifier(of leaderboard: GKLeaderboard) -> String {
+        if #available(iOS 14.0, *) {
+            let baseID = leaderboard.baseLeaderboardID
+            if !baseID.isEmpty {
+                return baseID
+            }
+        }
+        return leaderboardID
+    }
+
+    func loadPrimaryLeaderboard() async throws -> GKLeaderboard {
+        let requested = try await loadLeaderboards(ids: [leaderboardID])
+        if let exact = requested.first {
+            return exact
+        }
+
+        let all = try await loadLeaderboards(ids: nil)
+        if let caseInsensitive = all.first(where: {
+            leaderboardIdentifier(of: $0).caseInsensitiveCompare(leaderboardID) == .orderedSame
+        }) {
+            return caseInsensitive
+        }
+
+        if all.count == 1, let single = all.first {
+            return single
+        }
+
+        let availableIDs = all.map { leaderboardIdentifier(of: $0) }.joined(separator: ", ")
+        let message = availableIDs.isEmpty
+            ? "Leaderboard is not configured. Expected ID '\(leaderboardID)'. No leaderboards returned by Game Center."
+            : "Leaderboard is not configured. Expected ID '\(leaderboardID)'. Available IDs: \(availableIDs)"
+        throw NSError(
+            domain: "GameCenterManager",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: message]
+        )
+    }
+
+    func loadEntries(
+        from leaderboard: GKLeaderboard,
+        audience: LeaderboardAudienceScope,
+        timeRange: LeaderboardTimeRange,
+        limit: Int
+    ) async throws -> [GKLeaderboard.Entry] {
+        let safeLimit = max(1, min(limit, 100))
+        let range = NSRange(location: 1, length: safeLimit)
+
+        return try await withCheckedThrowingContinuation { continuation in
+            leaderboard.loadEntries(
+                for: audience.playerScope,
+                timeScope: timeRange.timeScope,
+                range: range
+            ) { _, entries, _, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                continuation.resume(returning: entries ?? [])
+            }
+        }
+    }
+
     func refreshRatings(for players: [GKPlayer]) {
         guard isAuthenticated else { return }
         guard !players.isEmpty else { return }
@@ -136,17 +287,10 @@ private extension GameCenterManager {
         isRefreshingRatings = true
 
         let boxedPlayers = UncheckedSendable(value: players)
-        GKLeaderboard.loadLeaderboards(IDs: [leaderboardID]) { [weak self] leaderboards, error in
-            let boxedLeaderboards = UncheckedSendable(value: leaderboards)
-            let errorDescription = error?.localizedDescription
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                defer { self.isRefreshingRatings = false }
-                if let errorDescription {
-                    self.lastError = errorDescription
-                    return
-                }
-                guard let leaderboard = boxedLeaderboards.value?.first else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let leaderboard = try await self.loadPrimaryLeaderboard()
                 let playersValue = boxedPlayers.value
                 leaderboard.loadEntries(for: playersValue, timeScope: .allTime) { localEntry, entries, error in
                     let entryErrorDescription = error?.localizedDescription
@@ -154,6 +298,7 @@ private extension GameCenterManager {
                     let entryScores = entries?.map { (id: $0.player.gamePlayerID, score: Int($0.score)) }
                     Task { @MainActor [weak self] in
                         guard let self else { return }
+                        self.isRefreshingRatings = false
                         if let entryErrorDescription {
                             self.lastError = entryErrorDescription
                             return
@@ -166,6 +311,9 @@ private extension GameCenterManager {
                         }
                     }
                 }
+            } catch {
+                self.isRefreshingRatings = false
+                self.lastError = error.localizedDescription
             }
         }
     }
@@ -191,19 +339,14 @@ private extension GameCenterManager {
     }
 
     func submitScore(_ score: Int) {
-        GKLeaderboard.submitScore(
-            score,
-            context: 0,
-            player: GKLocalPlayer.local,
-            leaderboardIDs: [leaderboardID]
-        ) { [weak self] error in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                if let error {
-                    self.lastError = error.localizedDescription
-                    return
-                }
-                self.refreshLeaderboard()
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let leaderboard = try await self.loadPrimaryLeaderboard()
+                let targetID = self.leaderboardIdentifier(of: leaderboard)
+                self.submitScoreValue(score, leaderboardID: targetID)
+            } catch {
+                self.lastError = error.localizedDescription
             }
         }
     }
@@ -218,6 +361,24 @@ private extension GameCenterManager {
             return 0.5
         default:
             return nil
+        }
+    }
+
+    func submitScoreValue(_ score: Int, leaderboardID: String) {
+        GKLeaderboard.submitScore(
+            score,
+            context: 0,
+            player: GKLocalPlayer.local,
+            leaderboardIDs: [leaderboardID]
+        ) { [weak self] error in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if let error {
+                    self.lastError = error.localizedDescription
+                    return
+                }
+                self.refreshLeaderboard()
+            }
         }
     }
 }

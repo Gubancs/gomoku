@@ -82,7 +82,8 @@ struct ZoomableScrollView<Content: View>: UIViewRepresentable {
             scrollView.layoutIfNeeded()
         }
 
-        if abs(scrollView.zoomScale - zoomScale) > 0.0001 {
+        if !context.coordinator.isZoomingGestureActive,
+           abs(scrollView.zoomScale - zoomScale) > 0.0001 {
             scrollView.setZoomScale(zoomScale, animated: false)
         }
 
@@ -114,6 +115,7 @@ struct ZoomableScrollView<Content: View>: UIViewRepresentable {
         var lastRecenterToken: Int = -1
         var lastBaseSize: CGSize = .zero
         var pendingForcedCenter: Bool = true
+        var isZoomingGestureActive: Bool = false
 
         init(_ parent: ZoomableScrollView) {
             self.parent = parent
@@ -124,16 +126,16 @@ struct ZoomableScrollView<Content: View>: UIViewRepresentable {
             hostingController.view
         }
 
+        func scrollViewWillBeginZooming(_ scrollView: UIScrollView, with view: UIView?) {
+            isZoomingGestureActive = true
+        }
+
         func scrollViewDidZoom(_ scrollView: UIScrollView) {
             centerContent(in: scrollView, forceOffset: false)
-            if abs(parent.zoomScale - scrollView.zoomScale) > 0.0001 {
-                DispatchQueue.main.async {
-                    self.parent.zoomScale = scrollView.zoomScale
-                }
-            }
         }
 
         func scrollViewDidEndZooming(_ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat) {
+            isZoomingGestureActive = false
             if abs(parent.zoomScale - scale) > 0.0001 {
                 DispatchQueue.main.async {
                     self.parent.zoomScale = scale

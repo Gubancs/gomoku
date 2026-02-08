@@ -8,6 +8,8 @@ struct BoardCellView: View {
     let player: Player?
     let size: CGFloat
     let stoneScale: CGFloat
+    let blackSymbol: StoneSymbolOption
+    let whiteSymbol: StoneSymbolOption
     let isLastMove: Bool
     let onTap: () -> Void
 
@@ -20,7 +22,11 @@ struct BoardCellView: View {
             )
 
             if let player {
-                StoneView(player: player)
+                StoneView(
+                    player: player,
+                    blackSymbol: blackSymbol,
+                    whiteSymbol: whiteSymbol
+                )
                     .frame(width: size * stoneScale, height: size * stoneScale)
             }
 

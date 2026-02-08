@@ -5,6 +5,8 @@ struct BoardCellsView: View {
     let board: [[Player?]]
     let cellSize: CGFloat
     let stoneScale: CGFloat
+    let blackSymbol: StoneSymbolOption
+    let whiteSymbol: StoneSymbolOption
     let lastMove: LastMove?
     let onTap: (Int, Int) -> Void
 
@@ -18,6 +20,8 @@ struct BoardCellsView: View {
                             player: board[row][col],
                             size: cellSize,
                             stoneScale: stoneScale,
+                            blackSymbol: blackSymbol,
+                            whiteSymbol: whiteSymbol,
                             isLastMove: isLastMove,
                             onTap: { onTap(row, col) }
                         )

@@ -13,6 +13,10 @@ enum Player: String, Codable {
     var displayName: String {
         self == .black ? "Black" : "White"
     }
+
+    var symbol: String {
+        StoneSymbolConfiguration.option(for: self).glyph
+    }
 }
 
 /// A single placed stone with its coordinates and owner.
@@ -40,6 +44,8 @@ final class GomokuGame: ObservableObject {
     @Published private(set) var isDraw: Bool
     @Published private(set) var lastMove: LastMove?
     @Published private(set) var winningLine: WinningLine?
+    private var partyCode: String?
+    private var playerSymbolPreferences: [String: PlayerSymbolPreferences]
 
     /// Creates a fresh game with an empty board.
     init(moveTimeLimit: TimeInterval = 50) {
@@ -53,6 +59,8 @@ final class GomokuGame: ObservableObject {
         self.isDraw = false
         self.lastMove = nil
         self.winningLine = nil
+        self.partyCode = nil
+        self.playerSymbolPreferences = [:]
     }
 
     /// Clears the board and resets turn and outcome state.
@@ -65,6 +73,8 @@ final class GomokuGame: ObservableObject {
         isDraw = false
         lastMove = nil
         winningLine = nil
+        partyCode = nil
+        playerSymbolPreferences = [:]
     }
 
     /// Removes the last move and restores the previous player.
@@ -124,7 +134,9 @@ final class GomokuGame: ObservableObject {
             winner: winner,
             isDraw: isDraw,
             lastMove: lastMove,
-            winningLine: winningLine
+            winningLine: winningLine,
+            partyCode: partyCode,
+            playerSymbolPreferences: playerSymbolPreferences
         )
     }
 
@@ -137,7 +149,13 @@ final class GomokuGame: ObservableObject {
         isDraw = state.isDraw
         lastMove = state.lastMove
         winningLine = state.winningLine
+        partyCode = state.partyCode
+        playerSymbolPreferences = state.playerSymbolPreferences
         moves = []
+    }
+
+    func symbolPreferences(for playerID: String) -> PlayerSymbolPreferences? {
+        playerSymbolPreferences[playerID]
     }
 
     /// Keeps the published board in sync with the board model.

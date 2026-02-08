@@ -6,9 +6,9 @@ struct OnlineDashboardView: View {
     @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var gameCenter: GameCenterManager
     let onStartMatch: () -> Void
+    let onOpenLeaderboards: () -> Void
     let onStartPartyHost: () -> Void
     let onStartPartyJoin: () -> Void
-    let onStartMatchmakerUI: () -> Void
     let onStartOfflineMatch: () -> Void
     let onSelectMatch: (GKTurnBasedMatch) -> Void
     private let surfacePrimaryText = Color(red: 0.12, green: 0.13, blue: 0.16)
@@ -36,12 +36,10 @@ struct OnlineDashboardView: View {
         return VStack(spacing: 16) {
             LazyVGrid(columns: singleColumn, spacing: 12) {
                 onlineAction
+                leaderboardsAction
                 partyHostAction
                 partyJoinAction
                 offlineAction
-#if DEBUG
-                debugMatchmakerAction
-#endif
             }
         }
     }
@@ -80,6 +78,23 @@ struct OnlineDashboardView: View {
         .disabled(!gameCenter.isAuthenticated || gameCenter.isFindingMatch)
     }
 
+    private var leaderboardsAction: some View {
+        Button {
+            onOpenLeaderboards()
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "list.number")
+                Text("Leaderboards")
+                    .fontWeight(.semibold)
+            }
+            .frame(maxWidth: .infinity, minHeight: 48)
+        }
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.roundedRectangle(radius: 10))
+        .tint(Color(red: 0.26, green: 0.50, blue: 0.88))
+        .disabled(!gameCenter.isAuthenticated)
+    }
+
     private var partyJoinAction: some View {
         Button {
             onStartPartyJoin()
@@ -96,25 +111,6 @@ struct OnlineDashboardView: View {
         .tint(Color(red: 0.26, green: 0.50, blue: 0.88))
         .disabled(!gameCenter.isAuthenticated || gameCenter.isFindingMatch)
     }
-
-#if DEBUG
-    private var debugMatchmakerAction: some View {
-        Button {
-            onStartMatchmakerUI()
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "wand.and.stars")
-                Text("GC Matchmaker UI")
-                    .fontWeight(.semibold)
-            }
-            .frame(maxWidth: .infinity, minHeight: 40)
-        }
-        .buttonStyle(.bordered)
-        .buttonBorderShape(.roundedRectangle(radius: 10))
-        .tint(Color(red: 0.20, green: 0.40, blue: 0.78))
-        .disabled(!gameCenter.isAuthenticated || gameCenter.isFindingMatch)
-    }
-#endif
 
     private var offlineAction: some View {
         Button {
@@ -145,12 +141,16 @@ struct OnlineDashboardView: View {
                     .padding(.horizontal, 4)
             } else {
                 ForEach(sortedActiveMatches, id: \.matchID) { match in
-                    Button {
-                        onSelectMatch(match)
-                    } label: {
+                    SwipeToDeleteMatchRow(
+                        onTap: {
+                            onSelectMatch(match)
+                        },
+                        onDelete: {
+                            gameCenter.removeMatch(match)
+                        }
+                    ) {
                         MatchRowView(match: match)
                     }
-                    .buttonStyle(.plain)
                 }
             }
         }
@@ -169,9 +169,12 @@ struct OnlineDashboardView: View {
                     .padding(.horizontal, 4)
             } else {
                 ForEach(sortedFinishedMatches, id: \.matchID) { match in
-                    HStack(spacing: 10) {
+                    SwipeToDeleteMatchRow(
+                        onDelete: {
+                            gameCenter.removeMatch(match)
+                        }
+                    ) {
                         MatchRowView(match: match)
-                        deleteMatchButton(for: match)
                     }
                 }
             }
@@ -179,29 +182,11 @@ struct OnlineDashboardView: View {
     }
 
     private var sortedActiveMatches: [GKTurnBasedMatch] {
-        gameCenter.activeMatches.sorted {
-            (($0.creationDate as Date?) ?? .distantPast) > (($1.creationDate as Date?) ?? .distantPast)
-        }
+        gameCenter.sortedMatchesForDisplay(gameCenter.activeMatches)
     }
 
     private var sortedFinishedMatches: [GKTurnBasedMatch] {
-        gameCenter.finishedMatches.sorted {
-            (($0.creationDate as Date?) ?? .distantPast) > (($1.creationDate as Date?) ?? .distantPast)
-        }
-    }
-
-    private func deleteMatchButton(for match: GKTurnBasedMatch) -> some View {
-        Button(role: .destructive) {
-            gameCenter.removeMatch(match)
-        } label: {
-            Image(systemName: "trash")
-                .font(.system(size: 14, weight: .semibold))
-                .frame(width: 34, height: 34)
-        }
-        .buttonStyle(.bordered)
-        .buttonBorderShape(.roundedRectangle(radius: 8))
-        .tint(Color.red.opacity(0.85))
-        .accessibilityLabel("Delete match")
+        gameCenter.sortedMatchesForDisplay(gameCenter.finishedMatches)
     }
 
     private func errorBanner(text: String) -> some View {
@@ -222,6 +207,7 @@ struct OnlineDashboardView: View {
         let eloValue = gameCenter.playerScore ?? gameCenter.localEloRating
         let rankValue = gameCenter.playerRank.map { "#\($0)" } ?? "-"
         let matchesValue = "\(gameCenter.activeMatches.count)"
+        let symbolValue = localPlayerSymbol
         let cardGradient = LinearGradient(
             colors: colorScheme == .dark
                 ? [
@@ -247,6 +233,9 @@ struct OnlineDashboardView: View {
 
                 HStack(spacing: 12) {
                     Text(verbatim: "ELO: \(eloValue)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(cardSecondaryText)
+                    Text(verbatim: "Symbol: \(symbolValue)")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(cardSecondaryText)
                     Text("Rank: \(rankValue)")
@@ -312,6 +301,106 @@ struct OnlineDashboardView: View {
         )
     }
 
+    private var localPlayerSymbol: String {
+        guard let match = gameCenter.currentMatch,
+              let color = gameCenter.localPlayerColor(in: match) else {
+            return "-"
+        }
+        return color.symbol
+    }
+
+}
+
+private struct SwipeToDeleteMatchRow<Content: View>: View {
+    private let actionWidth: CGFloat = 82
+    let onTap: (() -> Void)?
+    let onDelete: () -> Void
+    let content: Content
+    @State private var contentOffset: CGFloat = 0
+
+    init(
+        onTap: (() -> Void)? = nil,
+        onDelete: @escaping () -> Void,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.onTap = onTap
+        self.onDelete = onDelete
+        self.content = content()
+    }
+
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            Button(role: .destructive) {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    contentOffset = 0
+                }
+                onDelete()
+            } label: {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.red.opacity(0.88))
+                    Image(systemName: "trash")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+                .frame(width: actionWidth, height: 56)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Delete match")
+
+            content
+                .offset(x: contentOffset)
+                .contentShape(Rectangle())
+                .gesture(dragGesture)
+                .onTapGesture {
+                    if isOpen {
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            contentOffset = 0
+                        }
+                    } else {
+                        onTap?()
+                    }
+                }
+
+            // Transparent tap target above content for the revealed action area.
+            // This avoids the shifted content intercepting taps meant for delete.
+            Color.clear
+                .frame(width: actionWidth, height: 56)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    guard isOpen else { return }
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        contentOffset = 0
+                    }
+                    onDelete()
+                }
+                .allowsHitTesting(isOpen)
+                .accessibilityHidden(!isOpen)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .clipped()
+    }
+
+    private var isOpen: Bool {
+        contentOffset < -8
+    }
+
+    private var dragGesture: some Gesture {
+        DragGesture(minimumDistance: 10)
+            .onChanged { value in
+                let base = isOpen ? -actionWidth : 0
+                let proposed = base + value.translation.width
+                contentOffset = min(0, max(-actionWidth, proposed))
+            }
+            .onEnded { value in
+                let base = isOpen ? -actionWidth : 0
+                let predicted = base + value.predictedEndTranslation.width
+                let shouldOpen = predicted < (-actionWidth * 0.45)
+                withAnimation(.spring(response: 0.22, dampingFraction: 0.9)) {
+                    contentOffset = shouldOpen ? -actionWidth : 0
+                }
+            }
+    }
 }
 
 #if DEBUG
@@ -331,9 +420,14 @@ private extension OnlineDashboardView {
 
             debugRow("GC env", gameCenter.gameCenterEnvironmentName)
             debugRow("Bundle ID", gameCenter.bundleIdentifier)
+            debugRow("App version", gameCenter.appVersion)
+            debugRow("Build", gameCenter.buildNumber)
+            debugRow("Device", gameCenter.deviceDebugName)
             debugRow("App ID prefix", gameCenter.appIdentifierPrefix)
             debugRow("Team ID", gameCenter.teamIdentifier ?? "-")
             debugRow("App identifier", gameCenter.applicationIdentifier ?? "-")
+            debugRow("Multiplayer restricted", gameCenter.isMultiplayerRestricted ? "yes" : "no")
+            debugRow("Underage", gameCenter.isUnderage ? "yes" : "no")
             debugRow("Authenticated", gameCenter.isAuthenticated ? "yes" : "no")
             debugRow("Finding match", gameCenter.isFindingMatch ? "yes" : "no")
             debugRow("Awaiting rematch", gameCenter.isAwaitingRematch ? "yes" : "no")

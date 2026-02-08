@@ -7,6 +7,10 @@ struct BoardView: View {
 
     @AppStorage(StoneSizeConfiguration.storageKey)
     private var stoneSizeOptionRawValue: String = StoneSizeConfiguration.defaultOption.rawValue
+    @AppStorage(StoneSymbolConfiguration.blackStorageKey)
+    private var blackSymbolRawValue: String = StoneSymbolConfiguration.defaultBlack.rawValue
+    @AppStorage(StoneSymbolConfiguration.whiteStorageKey)
+    private var whiteSymbolRawValue: String = StoneSymbolConfiguration.defaultWhite.rawValue
 
     @ObservedObject var game: GomokuGame
     let cellSize: CGFloat
@@ -14,6 +18,8 @@ struct BoardView: View {
     var onCellTap: ((Int, Int) -> Void)? = nil
     var boardOverride: [[Player?]]? = nil
     var lastMoveOverride: LastMove? = nil
+    var blackSymbolOverride: StoneSymbolOption? = nil
+    var whiteSymbolOverride: StoneSymbolOption? = nil
 
     var body: some View {
         let board = boardOverride ?? game.board
@@ -25,6 +31,16 @@ struct BoardView: View {
         }
         let stoneScale = StoneSizeOption(rawValue: stoneSizeOptionRawValue)?.scale
             ?? StoneSizeConfiguration.defaultOption.scale
+        let blackSymbol = blackSymbolOverride
+            ?? StoneSymbolConfiguration.validatedOption(
+                rawValue: blackSymbolRawValue,
+                fallback: StoneSymbolConfiguration.defaultBlack
+            )
+        let whiteSymbol = whiteSymbolOverride
+            ?? StoneSymbolConfiguration.validatedOption(
+                rawValue: whiteSymbolRawValue,
+                fallback: StoneSymbolConfiguration.defaultWhite
+            )
 
         ZStack {
             (colorScheme == .dark
@@ -35,6 +51,8 @@ struct BoardView: View {
                 board: board,
                 cellSize: cellSize,
                 stoneScale: stoneScale,
+                blackSymbol: blackSymbol,
+                whiteSymbol: whiteSymbol,
                 lastMove: lastMove,
                 onTap: tapHandler
             )
