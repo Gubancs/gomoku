@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		01A1179E2F3B92E0001F3A15 /* PRIVACY_POLICY.md in Resources */ = {isa = PBXBuildFile; fileRef = 01A1179D2F3B92DE001F3A15 /* PRIVACY_POLICY.md */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		01657A132F3218AC00245B2A /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -27,6 +31,7 @@
 		01657A032F3218AB00245B2A /* gomoku.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = gomoku.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		01657A122F3218AC00245B2A /* gomokuTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = gomokuTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		01657A1C2F3218AC00245B2A /* gomokuUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = gomokuUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		01A1179D2F3B92DE001F3A15 /* PRIVACY_POLICY.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = PRIVACY_POLICY.md; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -75,6 +80,7 @@
 		016579FA2F3218AB00245B2A = {
 			isa = PBXGroup;
 			children = (
+				01A1179D2F3B92DE001F3A15 /* PRIVACY_POLICY.md */,
 				01657A052F3218AB00245B2A /* gomoku */,
 				01657A152F3218AC00245B2A /* gomokuTests */,
 				01657A1F2F3218AC00245B2A /* gomokuUITests */,
@@ -212,6 +218,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				01A1179E2F3B92E0001F3A15 /* PRIVACY_POLICY.md in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

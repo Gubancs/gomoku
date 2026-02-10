@@ -1,5 +1,6 @@
 import Foundation
 @preconcurrency internal import GameKit
+import CloudKit
 import UIKit
 import Combine
 
@@ -1519,18 +1520,46 @@ final class GameCenterManager: NSObject, ObservableObject {
     }
 
     func fetchOnlineCount() async -> Int? {
+        if isPresenceDisabled {
+            return nil
+        }
         let lookback: TimeInterval = 45 // seconds
         do {
             return try await presenceStore.onlineCount(within: lookback)
         } catch {
-            await MainActor.run {
-                self.partyError = error.localizedDescription
+            if shouldDisablePresence(for: error) {
+                await MainActor.run {
+                    self.isPresenceDisabled = true
+                }
+                return nil
             }
+            debugLog("presence count error: \(error.localizedDescription)")
             return nil
         }
     }
 
+    private func shouldDisablePresence(for error: Error) -> Bool {
+        if let ckError = error as? CKError {
+            switch ckError.code {
+            case .unknownItem, .zoneNotFound, .badContainer, .notAuthenticated, .permissionFailure, .invalidArguments:
+                let message = ckError.localizedDescription.lowercased()
+                if message.contains("record type") && message.contains("presence") {
+                    return true
+                }
+                if message.contains("did not find record type") {
+                    return true
+                }
+            default:
+                break
+            }
+        }
+        return false
+    }
+
     private func startPresenceHeartbeat() {
+        if isPresenceDisabled {
+            return
+        }
         stopPresenceHeartbeat()
         let timer = Timer(timeInterval: presenceHeartbeatInterval, repeats: true) { [weak self] _ in
             Task { [weak self] in
@@ -1543,9 +1572,14 @@ final class GameCenterManager: NSObject, ObservableObject {
                 do {
                     try await self.presenceStore.heartbeat(playerID: playerID)
                 } catch {
-                    await MainActor.run {
-                        self.partyError = error.localizedDescription
+                    if self.shouldDisablePresence(for: error) {
+                        await MainActor.run {
+                            self.isPresenceDisabled = true
+                            self.stopPresenceHeartbeat()
+                        }
+                        return
                     }
+                    self.debugLog("presence heartbeat error: \(error.localizedDescription)")
                 }
             }
         }
@@ -1835,6 +1869,7 @@ final class GameCenterManager: NSObject, ObservableObject {
 
     private var cachedProvisioningPlist: [String: Any]?
     private var presenceTimer: Timer?
+    private var isPresenceDisabled: Bool = false
     private var notificationObservers: [NSObjectProtocol] = []
     private var observedMatchDates: [String: Date] = [:]
 
@@ -1999,7 +2034,8 @@ final class GameCenterManager: NSObject, ObservableObject {
     func isLocalParticipant(_ participant: GKTurnBasedParticipant?) -> Bool {
         guard let participant, let player = participant.player else { return false }
         if isLocalPlayerID(player.gamePlayerID) { return true }
-        if let teamID = player.teamPlayerID, isLocalPlayerID(teamID) { return true }
+        let teamID = player.teamPlayerID
+        if !teamID.isEmpty, isLocalPlayerID(teamID) { return true }
         return false
     }
 
@@ -2010,7 +2046,8 @@ final class GameCenterManager: NSObject, ObservableObject {
         if !gameID.isEmpty {
             ids.insert(gameID)
         }
-        if let teamID = local.teamPlayerID, !teamID.isEmpty {
+        let teamID = local.teamPlayerID
+        if !teamID.isEmpty {
             ids.insert(teamID)
         }
         return ids

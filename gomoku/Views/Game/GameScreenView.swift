@@ -189,6 +189,7 @@ struct GameScreenView: View {
                         } label: {
                             Label("Lobby", systemImage: "chevron.backward")
                         }
+                        .tint(.primary)
                     }
                 }
             } else if isGameOver {
@@ -198,6 +199,7 @@ struct GameScreenView: View {
                     } label: {
                         Label("Lobby", systemImage: "chevron.backward")
                     }
+                    .tint(.primary)
                 }
             } else {
                 ToolbarItem(placement: .topBarLeading) {
