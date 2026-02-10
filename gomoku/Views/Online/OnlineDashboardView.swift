@@ -6,7 +6,6 @@ struct OnlineDashboardView: View {
     @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var gameCenter: GameCenterManager
     let onStartMatch: () -> Void
-    let onOpenLeaderboards: () -> Void
     let onStartPartyHost: () -> Void
     let onStartPartyJoin: () -> Void
     let onStartOfflineMatch: () -> Void
@@ -16,16 +15,13 @@ struct OnlineDashboardView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            activeMatchesSection
             profileCard
+#if DEBUG
             if let errorText = gameCenter.lastError, !errorText.isEmpty {
                 errorBanner(text: errorText)
             }
-            actionSections
-            finishedMatchesSection
-#if DEBUG
-            debugSection
 #endif
+            actionSections
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -36,7 +32,6 @@ struct OnlineDashboardView: View {
         return VStack(spacing: 16) {
             LazyVGrid(columns: singleColumn, spacing: 12) {
                 onlineAction
-                leaderboardsAction
                 partyHostAction
                 partyJoinAction
                 offlineAction
@@ -46,11 +41,15 @@ struct OnlineDashboardView: View {
 
     private var onlineAction: some View {
         Button {
-            onStartMatch()
+            if let match = primaryActiveMatch {
+                onSelectMatch(match)
+            } else {
+                onStartMatch()
+            }
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "flag.checkered")
-                Text("Online")
+                Text(primaryActiveMatch == nil ? "Online" : "Resume Match")
                     .fontWeight(.semibold)
             }
             .frame(maxWidth: .infinity, minHeight: 56)
@@ -58,7 +57,7 @@ struct OnlineDashboardView: View {
         .buttonStyle(.borderedProminent)
         .buttonBorderShape(.roundedRectangle(radius: 10))
         .tint(Color(red: 0.26, green: 0.50, blue: 0.88))
-        .disabled(!gameCenter.isAuthenticated || gameCenter.isFindingMatch)
+        .disabled(!gameCenter.isAuthenticated || gameCenter.isFindingMatch || primaryActiveMatch != nil)
     }
 
     private var partyHostAction: some View {
@@ -75,24 +74,7 @@ struct OnlineDashboardView: View {
         .buttonStyle(.bordered)
         .buttonBorderShape(.roundedRectangle(radius: 10))
         .tint(Color(red: 0.26, green: 0.50, blue: 0.88))
-        .disabled(!gameCenter.isAuthenticated || gameCenter.isFindingMatch)
-    }
-
-    private var leaderboardsAction: some View {
-        Button {
-            onOpenLeaderboards()
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "list.number")
-                Text("Leaderboards")
-                    .fontWeight(.semibold)
-            }
-            .frame(maxWidth: .infinity, minHeight: 48)
-        }
-        .buttonStyle(.bordered)
-        .buttonBorderShape(.roundedRectangle(radius: 10))
-        .tint(Color(red: 0.26, green: 0.50, blue: 0.88))
-        .disabled(!gameCenter.isAuthenticated)
+        .disabled(!gameCenter.isAuthenticated || gameCenter.isFindingMatch || primaryActiveMatch != nil)
     }
 
     private var partyJoinAction: some View {
@@ -109,7 +91,7 @@ struct OnlineDashboardView: View {
         .buttonStyle(.bordered)
         .buttonBorderShape(.roundedRectangle(radius: 10))
         .tint(Color(red: 0.26, green: 0.50, blue: 0.88))
-        .disabled(!gameCenter.isAuthenticated || gameCenter.isFindingMatch)
+        .disabled(!gameCenter.isAuthenticated || gameCenter.isFindingMatch || primaryActiveMatch != nil)
     }
 
     private var offlineAction: some View {
@@ -118,7 +100,7 @@ struct OnlineDashboardView: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "person.2.fill")
-                Text("2 players")
+                Text("Offline 2 players")
                     .fontWeight(.semibold)
             }
             .frame(maxWidth: .infinity, minHeight: 56)
@@ -126,67 +108,15 @@ struct OnlineDashboardView: View {
         .buttonStyle(.bordered)
         .buttonBorderShape(.roundedRectangle(radius: 10))
         .tint(Color(red: 0.26, green: 0.50, blue: 0.88))
-    }
-
-    private var activeMatchesSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Active Matches")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(cardPrimaryText)
-
-            if sortedActiveMatches.isEmpty {
-                Text("No active matches.")
-                    .font(.caption)
-                    .foregroundStyle(cardSecondaryText)
-                    .padding(.horizontal, 4)
-            } else {
-                ForEach(sortedActiveMatches, id: \.matchID) { match in
-                    SwipeToDeleteMatchRow(
-                        onTap: {
-                            onSelectMatch(match)
-                        },
-                        onDelete: {
-                            gameCenter.removeMatch(match)
-                        }
-                    ) {
-                        MatchRowView(match: match)
-                    }
-                }
-            }
-        }
-    }
-
-    private var finishedMatchesSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Finished Matches")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(cardPrimaryText)
-
-            if sortedFinishedMatches.isEmpty {
-                Text("No finished matches.")
-                    .font(.caption)
-                    .foregroundStyle(cardSecondaryText)
-                    .padding(.horizontal, 4)
-            } else {
-                ForEach(sortedFinishedMatches, id: \.matchID) { match in
-                    SwipeToDeleteMatchRow(
-                        onDelete: {
-                            gameCenter.removeMatch(match)
-                        }
-                    ) {
-                        MatchRowView(match: match)
-                    }
-                }
-            }
-        }
+        .disabled(primaryActiveMatch != nil)
     }
 
     private var sortedActiveMatches: [GKTurnBasedMatch] {
         gameCenter.sortedMatchesForDisplay(gameCenter.activeMatches)
     }
 
-    private var sortedFinishedMatches: [GKTurnBasedMatch] {
-        gameCenter.sortedMatchesForDisplay(gameCenter.finishedMatches)
+    private var primaryActiveMatch: GKTurnBasedMatch? {
+        sortedActiveMatches.first
     }
 
     private func errorBanner(text: String) -> some View {
@@ -206,8 +136,8 @@ struct OnlineDashboardView: View {
         let name = GKLocalPlayer.local.displayName
         let eloValue = gameCenter.playerScore ?? gameCenter.localEloRating
         let rankValue = gameCenter.playerRank.map { "#\($0)" } ?? "-"
-        let matchesValue = "\(gameCenter.activeMatches.count)"
-        let symbolValue = localPlayerSymbol
+        let matchesValue = "\(gameCenter.finishedMatches.count)"
+        let record = localRecordSummary
         let cardGradient = LinearGradient(
             colors: colorScheme == .dark
                 ? [
@@ -222,42 +152,80 @@ struct OnlineDashboardView: View {
             endPoint: .bottomTrailing
         )
 
-        return HStack(spacing: 12) {
-            profileAvatar
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                profileAvatar
+                    .frame(width: 56, height: 56)
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(name)
-                    .font(.headline)
-                    .foregroundStyle(cardPrimaryText)
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(name)
+                        .font(.title3.weight(.bold))
+                        .foregroundStyle(cardPrimaryText)
+                        .lineLimit(1)
+                    Text("Game Center")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(cardSecondaryText)
+                }
 
-                HStack(spacing: 12) {
-                    Text(verbatim: "ELO: \(eloValue)")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(cardSecondaryText)
-                    Text(verbatim: "Symbol: \(symbolValue)")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(cardSecondaryText)
-                    Text("Rank: \(rankValue)")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(cardSecondaryText)
-                    Text("Matches: \(matchesValue)")
+                Spacer(minLength: 0)
+
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("\(eloValue)")
+                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .foregroundStyle(cardPrimaryText)
+                    Text("ELO")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(cardSecondaryText)
                 }
             }
 
-            Spacer(minLength: 0)
+            HStack(spacing: 8) {
+                statPill(title: "Rank", value: rankValue, systemImage: "crown.fill")
+                statPill(title: "Matches", value: matchesValue, systemImage: "flag.checkered")
+                statPill(title: "Wins", value: "\(record.wins)", systemImage: "trophy.fill")
+                statPill(title: "Losses", value: "\(record.losses)", systemImage: "xmark.seal.fill")
+            }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity)
-        .background(cardGradient, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(cardGradient, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(colorScheme == .dark ? Color.white.opacity(0.22) : Color.white.opacity(0.55), lineWidth: 1)
         )
-        .shadow(color: Color.black.opacity(0.12), radius: 6, x: 0, y: 4)
+        .shadow(color: Color.black.opacity(0.14), radius: 10, x: 0, y: 6)
+    }
+
+    private var localRecordSummary: (wins: Int, losses: Int) {
+        var wins = 0
+        var losses = 0
+
+        for match in gameCenter.finishedMatches {
+            guard let participant = match.participants.first(where: { gameCenter.isLocalParticipant($0) }) else {
+                continue
+            }
+            switch participant.matchOutcome {
+            case .won:
+                wins += 1
+            case .lost, .quit, .timeExpired:
+                losses += 1
+            case .none:
+                if let state = gameCenter.loadState(from: match),
+                   let winner = state.winner,
+                   let localColor = gameCenter.localPlayerColor(in: match) {
+                    if winner == localColor {
+                        wins += 1
+                    } else {
+                        losses += 1
+                    }
+                }
+            default:
+                break
+            }
+        }
+
+        return (wins, losses)
     }
 
     private var cardPrimaryText: Color {
@@ -273,7 +241,7 @@ struct OnlineDashboardView: View {
     }
 
     private var profileAvatar: some View {
-        let avatarSize: CGFloat = 48
+        let avatarSize: CGFloat = 56
         let image = gameCenter.avatarImage(for: GKLocalPlayer.local)
 
         return ZStack {
@@ -301,22 +269,40 @@ struct OnlineDashboardView: View {
         )
     }
 
-    private var localPlayerSymbol: String {
-        guard let match = gameCenter.currentMatch,
-              let color = gameCenter.localPlayerColor(in: match) else {
-            return "-"
+    private func statPill(title: String, value: String, systemImage: String) -> some View {
+        VStack(spacing: 4) {
+            Image(systemName: systemImage)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(cardSecondaryText)
+            Text(value)
+                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .foregroundStyle(cardPrimaryText)
+                .minimumScaleFactor(0.7)
+            Text(title)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(cardSecondaryText)
         }
-        return color.symbol
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.white.opacity(colorScheme == .dark ? 0.10 : 0.65))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color.black.opacity(colorScheme == .dark ? 0.16 : 0.08), lineWidth: 1)
+        )
     }
 
 }
 
-private struct SwipeToDeleteMatchRow<Content: View>: View {
+struct SwipeToDeleteMatchRow<Content: View>: View {
     private let actionWidth: CGFloat = 82
     let onTap: (() -> Void)?
     let onDelete: () -> Void
     let content: Content
     @State private var contentOffset: CGFloat = 0
+    @State private var rowHeight: CGFloat = 56
 
     init(
         onTap: (() -> Void)? = nil,
@@ -343,7 +329,7 @@ private struct SwipeToDeleteMatchRow<Content: View>: View {
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(.white)
                 }
-                .frame(width: actionWidth, height: 56)
+                .frame(width: actionWidth, height: rowHeight)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Delete match")
@@ -351,6 +337,17 @@ private struct SwipeToDeleteMatchRow<Content: View>: View {
             content
                 .offset(x: contentOffset)
                 .contentShape(Rectangle())
+                .background(
+                    GeometryReader { proxy in
+                        Color.clear
+                            .onAppear {
+                                rowHeight = max(44, proxy.size.height)
+                            }
+                            .onChange(of: proxy.size.height) { newValue in
+                                rowHeight = max(44, newValue)
+                            }
+                    }
+                )
                 .gesture(dragGesture)
                 .onTapGesture {
                     if isOpen {
@@ -365,7 +362,7 @@ private struct SwipeToDeleteMatchRow<Content: View>: View {
             // Transparent tap target above content for the revealed action area.
             // This avoids the shifted content intercepting taps meant for delete.
             Color.clear
-                .frame(width: actionWidth, height: 56)
+                .frame(width: actionWidth, height: rowHeight)
                 .contentShape(Rectangle())
                 .onTapGesture {
                     guard isOpen else { return }

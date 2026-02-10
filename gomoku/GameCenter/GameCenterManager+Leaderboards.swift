@@ -75,7 +75,7 @@ extension GameCenterManager {
                             return
                         }
                         if let score {
-                            self.setLocalEloRating(Int(score))
+                            self.applyLocalEloFromLeaderboard(Int(score))
                         }
                         self.playerRank = rank
                     }
@@ -170,6 +170,8 @@ extension GameCenterManager {
             kFactor: eloKFactor
         )
 
+        lastSubmittedEloRating = newRating
+        lastLocalEloUpdateAt = Date()
         setLocalEloRating(newRating)
         var processed = processedMatchIDs
         processed.insert(match.matchID)
@@ -206,6 +208,21 @@ extension GameCenterManager {
 }
 
 private extension GameCenterManager {
+    func applyLocalEloFromLeaderboard(_ score: Int) {
+        if let pending = lastSubmittedEloRating,
+           let pendingAt = lastLocalEloUpdateAt,
+           Date().timeIntervalSince(pendingAt) < localEloSyncGraceInterval,
+           score != pending {
+            debugLog("leaderboard score \(score) ignored; pending local \(pending)")
+            return
+        }
+        if let pending = lastSubmittedEloRating, score == pending {
+            lastSubmittedEloRating = nil
+            lastLocalEloUpdateAt = nil
+        }
+        setLocalEloRating(score)
+    }
+
     func loadLeaderboards(ids: [String]?) async throws -> [GKLeaderboard] {
         try await withCheckedThrowingContinuation { continuation in
             GKLeaderboard.loadLeaderboards(IDs: ids) { leaderboards, error in
@@ -304,7 +321,7 @@ private extension GameCenterManager {
                             return
                         }
                         if let localScore {
-                            self.setLocalEloRating(Int(localScore))
+                            self.applyLocalEloFromLeaderboard(Int(localScore))
                         }
                         entryScores?.forEach { entry in
                             self.playerRatingCache[entry.id] = entry.score

@@ -24,6 +24,18 @@ struct GameScreenView: View {
     @State private var timerTurnToken: String = ""
     @State private var wasWaitingForOpponent: Bool = false
     @State private var playedStartSoundMatchID: String?
+    @State private var hasLoadedInitialState: Bool = false
+    @State private var isBoardCentered: Bool = false
+    @State private var lastLoadedMatchID: String?
+    @State private var suppressMatchSounds: Bool = true
+    @State private var baseBlackRemaining: TimeInterval?
+    @State private var baseWhiteRemaining: TimeInterval?
+    @State private var turnStartedAt: Date?
+    @State private var isApplyingMatchUpdate: Bool = false
+    @State private var lastClockTickSecond: Int?
+    @State private var cancelCooldownRemaining: Int = 0
+    @State private var waitingSpinnerRotation: Double = 0
+    @State private var initialTurnStartMatchID: String?
 
     private let moveTimeLimit: TimeInterval
 
@@ -44,7 +56,7 @@ struct GameScreenView: View {
         let savedAt: Date
     }
 
-    init(moveTimeLimit: TimeInterval = 50) {
+    init(moveTimeLimit: TimeInterval = 60) {
         self.moveTimeLimit = moveTimeLimit
         _game = StateObject(wrappedValue: GomokuGame(moveTimeLimit: moveTimeLimit))
         _blackTimeRemaining = State(initialValue: moveTimeLimit)
@@ -60,12 +72,18 @@ struct GameScreenView: View {
                 background
 
                 VStack(spacing: 12) {
-                    playerCard(for: topDisplayedPlayer, isActive: game.currentPlayer == topDisplayedPlayer)
+                    playerCard(
+                        for: topDisplayedPlayer,
+                        isActive: !isWaitingForOpponent && game.currentPlayer == topDisplayedPlayer
+                    )
 
                     ZStack {
                         boardScroller(height: boardHeight)
 
-                        if isWaitingForOpponent {
+                        if isBoardLoading {
+                            loadingOverlay
+                                .padding(.horizontal, 18)
+                        } else if isWaitingForOpponent {
                             waitingBanner
                                 .padding(.horizontal, 18)
                         }
@@ -75,7 +93,10 @@ struct GameScreenView: View {
                         replayControls
                     }
 
-                    playerCard(for: bottomDisplayedPlayer, isActive: game.currentPlayer == bottomDisplayedPlayer)
+                    playerCard(
+                        for: bottomDisplayedPlayer,
+                        isActive: !isWaitingForOpponent && game.currentPlayer == bottomDisplayedPlayer
+                    )
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 6)
@@ -100,15 +121,19 @@ struct GameScreenView: View {
             applyMatchUpdateIfNeeded(gameCenter.currentMatch)
             shouldPlayMoveSound = true
             wasWaitingForOpponent = isWaitingForOpponent
+            suppressMatchSounds = true
+            syncCancelCooldown()
             if isSoundEnabled {
                 SoundEffects.prepare()
             }
         }
         .onReceive(timer) { _ in
+            handleCancelCooldownTick()
             tickTimer()
         }
         .onChange(of: game.currentPlayer) { _ in
             handleTurnTransition()
+            lastClockTickSecond = nil
         }
         .onChange(of: game.moves.count) { _ in
             if game.moves.isEmpty {
@@ -116,22 +141,27 @@ struct GameScreenView: View {
             }
         }
         .onChange(of: isGameOver) { newValue in
-            isEndgameOverlayVisible = newValue
             replayMoveIndex = newValue ? replayMaxMoveIndex : 0
             if newValue {
-                playGameEndSoundIfNeeded()
+                if !suppressMatchSounds {
+                    playGameEndSoundIfNeeded()
+                }
                 recordOfflineResultIfNeeded()
             } else {
                 hasRecordedOfflineResult = false
             }
+            isEndgameOverlayVisible = false
+            lastClockTickSecond = nil
         }
         .onChange(of: isSoundEnabled) { newValue in
             if newValue {
                 SoundEffects.prepare()
             }
+            lastClockTickSecond = nil
         }
         .onChange(of: game.lastMove) { newValue in
             guard shouldPlayMoveSound, let move = newValue else { return }
+            guard !suppressMatchSounds else { return }
             playMoveSound(for: move.player)
         }
         .onChange(of: isWaitingForOpponent) { newValue in
@@ -140,10 +170,16 @@ struct GameScreenView: View {
                 playMatchStartSoundIfNeeded()
             }
             wasWaitingForOpponent = newValue
+            syncCancelCooldown()
+            if newValue {
+                lastClockTickSecond = nil
+            }
         }
         .onDisappear {
             persistTimerState()
         }
+        .statusBar(hidden: true)
+        .persistentSystemOverlays(.hidden)
         .toolbar {
             if isOnlineSession {
                 ToolbarItem(placement: .topBarLeading) {
@@ -152,14 +188,6 @@ struct GameScreenView: View {
                             closeToDashboard()
                         } label: {
                             Label("Lobby", systemImage: "chevron.backward")
-                        }
-                    } else {
-                        Button("Back") {
-                            if gameCenter.isFindingMatch {
-                                gameCenter.cancelMatchmaking()
-                            }
-                            gameCenter.currentMatch = nil
-                            dismiss()
                         }
                     }
                 }
@@ -196,6 +224,8 @@ struct GameScreenView: View {
             }
         }
         .toolbar(.visible, for: .navigationBar)
+        .navigationBarBackButtonHidden(true)
+        .toolbar(.hidden, for: .tabBar)
     }
 
     private var soundToggleButton: some View {
@@ -213,12 +243,18 @@ struct GameScreenView: View {
 
     private func boardScroller(height: CGFloat) -> some View {
         let replaySnapshot = shouldShowReplayControls ? makeReplaySnapshot(upTo: currentReplayMoveIndex) : nil
+        let shouldShowWinningLine = !shouldShowReplayControls || currentReplayMoveIndex >= replayMaxMoveIndex
 
         return ZoomableScrollView(
             zoomScale: $zoomScale,
             minZoomScale: minZoomScale,
             maxZoomScale: maxZoomScale,
-            recenterToken: recenterToken
+            recenterToken: recenterToken,
+            onCentered: {
+                if !isBoardCentered {
+                    isBoardCentered = true
+                }
+            }
         ) {
             BoardView(
                 game: game,
@@ -228,7 +264,8 @@ struct GameScreenView: View {
                 boardOverride: replaySnapshot?.board,
                 lastMoveOverride: replaySnapshot?.lastMove,
                 blackSymbolOverride: stoneSymbolOption(for: .black),
-                whiteSymbolOverride: stoneSymbolOption(for: .white)
+                whiteSymbolOverride: stoneSymbolOption(for: .white),
+                showWinningLine: shouldShowWinningLine
             )
             .padding(16)
         }
@@ -243,8 +280,7 @@ struct GameScreenView: View {
 
     private var waitingBanner: some View {
         VStack(spacing: 12) {
-            Image(systemName: "person.2.wave.2.fill")
-                .foregroundStyle(chromeSecondaryText)
+            waitingSpinner
 
             Text(waitingBannerTitle)
                 .font(.headline.weight(.semibold))
@@ -272,14 +308,32 @@ struct GameScreenView: View {
             Button {
                 cancelSearchingAndReturnToLobby()
             } label: {
-                Text("Cancel")
-                    .font(.headline.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
+                ZStack {
+                    Text("Cancel")
+                        .font(.headline.weight(.semibold))
+
+                    HStack {
+                        Spacer()
+                        if cancelCooldownRemaining > 0 {
+                            Text("\(cancelCooldownRemaining)")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 18, height: 18)
+                                .background(Color.black.opacity(0.55), in: Circle())
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
             }
             .buttonStyle(.borderedProminent)
             .tint(Color(red: 0.86, green: 0.18, blue: 0.16))
-            .accessibilityLabel("Cancel matchmaking and return to lobby")
+            .disabled(cancelCooldownRemaining > 0)
+            .accessibilityLabel(
+                cancelCooldownRemaining > 0
+                    ? "Cancel available in \(cancelCooldownRemaining) seconds"
+                    : "Cancel matchmaking and return to lobby"
+            )
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 14)
@@ -291,6 +345,90 @@ struct GameScreenView: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.black.opacity(0.08), lineWidth: 1)
+        )
+    }
+
+    private var waitingSpinner: some View {
+        ZStack {
+            Circle()
+                .stroke(chromeSecondaryText.opacity(0.18), lineWidth: 6)
+                .frame(width: 52, height: 52)
+
+            Circle()
+                .trim(from: 0.1, to: 0.9)
+                .stroke(
+                    AngularGradient(
+                        colors: [
+                            chromeSecondaryText.opacity(0.15),
+                            chromePrimaryText.opacity(0.95),
+                            chromeSecondaryText.opacity(0.15)
+                        ],
+                        center: .center
+                    ),
+                    style: StrokeStyle(lineWidth: 6, lineCap: .round)
+                )
+                .frame(width: 52, height: 52)
+                .rotationEffect(.degrees(waitingSpinnerRotation))
+        }
+        .onAppear {
+            waitingSpinnerRotation = 0
+            withAnimation(.linear(duration: 2.4).repeatForever(autoreverses: false)) {
+                waitingSpinnerRotation = 360
+            }
+        }
+        .onDisappear {
+            waitingSpinnerRotation = 0
+        }
+    }
+
+    private func handleCancelCooldownTick() {
+        syncCancelCooldown()
+    }
+
+    private func syncCancelCooldown() {
+        guard isWaitingForOpponent else {
+            cancelCooldownRemaining = 0
+            return
+        }
+        guard let until = gameCenter.cancelCooldownUntil else {
+            cancelCooldownRemaining = 0
+            return
+        }
+        let remaining = Int(ceil(until.timeIntervalSinceNow))
+        if remaining <= 0 {
+            cancelCooldownRemaining = 0
+            gameCenter.cancelCooldownUntil = nil
+        } else {
+            cancelCooldownRemaining = remaining
+        }
+    }
+
+    private var loadingOverlay: some View {
+        VStack(spacing: 12) {
+            ProgressView()
+                .progressViewStyle(.circular)
+                .tint(chromePrimaryText)
+                .scaleEffect(1.15)
+
+            Text("Loading board...")
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(chromePrimaryText)
+
+            Text("Centering and syncing the latest state.")
+                .font(.caption)
+                .foregroundStyle(chromeSecondaryText)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 18)
+        .frame(maxWidth: 320)
+        .multilineTextAlignment(.center)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.white.opacity(colorScheme == .dark ? 0.12 : 0.75))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(Color.black.opacity(0.08), lineWidth: 1)
         )
     }
@@ -356,9 +494,17 @@ struct GameScreenView: View {
     private var replayControls: some View {
         HStack(spacing: 12) {
             Button {
+                jumpReplayToStart()
+            } label: {
+                Image(systemName: "backward.end")
+            }
+            .buttonStyle(.bordered)
+            .disabled(currentReplayMoveIndex <= 0)
+
+            Button {
                 stepReplayBackward()
             } label: {
-                Label("Previous", systemImage: "chevron.left")
+                Image(systemName: "chevron.left")
             }
             .buttonStyle(.bordered)
             .disabled(!canStepReplayBackward)
@@ -371,12 +517,21 @@ struct GameScreenView: View {
             Button {
                 stepReplayForward()
             } label: {
-                Label("Next", systemImage: "chevron.right")
+                Image(systemName: "chevron.right")
             }
             .buttonStyle(.bordered)
             .disabled(!canStepReplayForward)
+
+            Button {
+                jumpReplayToEnd()
+            } label: {
+                Image(systemName: "forward.end")
+            }
+            .buttonStyle(.bordered)
+            .disabled(currentReplayMoveIndex >= replayMaxMoveIndex)
         }
         .frame(maxWidth: .infinity)
+        .tint(Color(red: 0.26, green: 0.50, blue: 0.88))
     }
 
     private var endgameControls: some View {
@@ -993,9 +1148,16 @@ struct GameScreenView: View {
     }
 
     private var isWaitingForOpponent: Bool {
-        guard gameCenter.isFindingMatch else { return false }
-        guard let match = gameCenter.currentMatch else { return true }
-        return !gameCenter.isMatchReady(match)
+        if isGameOver {
+            return false
+        }
+        if let match = gameCenter.currentMatch {
+            if match.status == .ended {
+                return false
+            }
+            return !gameCenter.isMatchReady(match)
+        }
+        return gameCenter.isFindingMatch
     }
 
     private var waitingPartyCode: String? {
@@ -1060,7 +1222,7 @@ struct GameScreenView: View {
     }
 
     private var isReplayActive: Bool {
-        isGameOver && !isEndgameOverlayVisible
+        isGameOver
     }
 
     private var hasReplayHistory: Bool {
@@ -1068,11 +1230,20 @@ struct GameScreenView: View {
     }
 
     private var shouldShowReplayControls: Bool {
-        isReplayActive && hasReplayHistory
+        isGameOver && hasReplayHistory
+    }
+
+    private var isBoardLoading: Bool {
+        !hasLoadedInitialState || !isBoardCentered
     }
 
     private var isBlockingOverlay: Bool {
-        isResigning || isConfirmingResign || gameCenter.isAwaitingRematch || gameCenter.incomingRematchMatchID != nil || isEndgameOverlayActive
+        isResigning
+            || isConfirmingResign
+            || gameCenter.isAwaitingRematch
+            || gameCenter.incomingRematchMatchID != nil
+            || isEndgameOverlayActive
+            || isBoardLoading
     }
 
     private var replayMaxMoveIndex: Int {
@@ -1106,6 +1277,9 @@ struct GameScreenView: View {
     private var canInteractBoard: Bool {
         guard !isReplayActive else { return false }
         guard !isWaitingForOpponent else { return false }
+        if !isOnlineSession {
+            return !isGameOver && !isBlockingOverlay
+        }
         return isLocalTurn
     }
 
@@ -1187,9 +1361,11 @@ struct GameScreenView: View {
 
         if let match = gameCenter.currentMatch {
             guard isLocalTurn else { return }
+            let actingPlayer = game.currentPlayer
             game.placeStone(row: row, col: col)
             if game.moves.count != beforeCount || game.winner != nil || game.isDraw {
-                gameCenter.submitTurn(game: game, match: match)
+                let snapshot = makeTimerSnapshotForSubmission(actingPlayer: actingPlayer)
+                gameCenter.submitTurn(game: game, match: match, timerSnapshot: snapshot)
             }
         } else {
             game.placeStone(row: row, col: col)
@@ -1214,6 +1390,14 @@ struct GameScreenView: View {
     private func stepReplayForward() {
         guard canStepReplayForward else { return }
         replayMoveIndex = currentReplayMoveIndex + 1
+    }
+
+    private func jumpReplayToStart() {
+        replayMoveIndex = 0
+    }
+
+    private func jumpReplayToEnd() {
+        replayMoveIndex = replayMaxMoveIndex
     }
 
     private func makeReplaySnapshot(upTo moveIndex: Int) -> (board: [[Player?]], lastMove: LastMove?) {
@@ -1262,10 +1446,28 @@ struct GameScreenView: View {
 
     private func playMatchStartSoundIfNeeded() {
         guard isSoundEnabled else { return }
-        guard let matchID = gameCenter.currentMatch?.matchID, !matchID.isEmpty else { return }
+        guard !isReplayActive else { return }
+        guard let match = gameCenter.currentMatch else { return }
+        guard match.status != .ended else { return }
+        guard !hasTerminalOutcome(match) else { return }
+        let matchID = match.matchID
+        guard !matchID.isEmpty else { return }
         guard playedStartSoundMatchID != matchID else { return }
         playedStartSoundMatchID = matchID
         SoundEffects.playMatchStart()
+    }
+
+    private func hasTerminalOutcome(_ match: GKTurnBasedMatch) -> Bool {
+        match.participants.contains { participant in
+            switch participant.matchOutcome {
+            case .won, .lost, .quit, .timeExpired, .tied:
+                return true
+            case .none:
+                return false
+            @unknown default:
+                return false
+            }
+        }
     }
 
     private func playGameEndSoundIfNeeded() {
@@ -1295,7 +1497,8 @@ struct GameScreenView: View {
 
         if isOnlineMatch {
             isResigning = true
-            gameCenter.resignCurrentMatch(using: game, shouldClearCurrentMatch: false) { _ in
+            let snapshot = makeTimerSnapshotForSubmission(actingPlayer: game.currentPlayer)
+            gameCenter.resignCurrentMatch(using: game, timerSnapshot: snapshot, shouldClearCurrentMatch: false) { _ in
                 isResigning = false
             }
         }
@@ -1348,12 +1551,145 @@ struct GameScreenView: View {
         }
     }
 
+    private func applyOnlineTimerState(from state: GameState, match: GKTurnBasedMatch?) {
+        let startedAt = resolveTurnStart(from: state, match: match)
+        turnStartedAt = startedAt
+
+        if isGameOver {
+            let blackBase = state.blackTimeRemaining ?? moveTimeLimit
+            let whiteBase = state.whiteTimeRemaining ?? moveTimeLimit
+            baseBlackRemaining = blackBase
+            baseWhiteRemaining = whiteBase
+            blackTimeRemaining = blackBase
+            whiteTimeRemaining = whiteBase
+            return
+        }
+
+        // Per-move timer: each turn starts with a full clock.
+        baseBlackRemaining = moveTimeLimit
+        baseWhiteRemaining = moveTimeLimit
+        blackTimeRemaining = moveTimeLimit
+        whiteTimeRemaining = moveTimeLimit
+        refreshOnlineTimerRemaining()
+    }
+
+    private func sanitizedTurnStart(from state: GameState) -> Date {
+        guard let raw = state.turnStartedAt else { return Date() }
+        // Guard against missing/invalid timestamps (e.g. 0 or epoch).
+        if raw < 1_000_000_000 {
+            return Date()
+        }
+        let now = Date().timeIntervalSince1970
+        if raw > now + 3600 {
+            return Date()
+        }
+        return Date(timeIntervalSince1970: raw)
+    }
+
+    private func resolveTurnStart(from state: GameState, match: GKTurnBasedMatch?) -> Date {
+        let now = Date()
+        var candidate = sanitizedTurnStart(from: state)
+
+        if let match {
+            if let lastTurnDate = match.value(forKey: "lastTurnDate") as? Date {
+                if lastTurnDate > candidate {
+                    candidate = lastTurnDate
+                }
+            } else if let creationDate = match.creationDate as Date? {
+                if creationDate > candidate {
+                    candidate = creationDate
+                }
+            }
+
+            if gameCenter.isMatchReady(match), state.moves.isEmpty {
+                if initialTurnStartMatchID != match.matchID {
+                    initialTurnStartMatchID = match.matchID
+                    candidate = now
+                }
+            }
+        }
+
+        return candidate
+    }
+
+    private func refreshOnlineTimerRemaining() {
+        guard isOnlineMatch else { return }
+        guard let start = turnStartedAt else { return }
+        var black = baseBlackRemaining ?? blackTimeRemaining
+        var white = baseWhiteRemaining ?? whiteTimeRemaining
+        let elapsed = max(0, Date().timeIntervalSince(start))
+        if !isGameOver {
+            if game.currentPlayer == .black {
+                black = max(0, black - elapsed)
+            } else {
+                white = max(0, white - elapsed)
+            }
+        }
+        blackTimeRemaining = black
+        whiteTimeRemaining = white
+    }
+
+    private func makeTimerSnapshotForSubmission(
+        actingPlayer: Player,
+        forceRemaining: TimeInterval? = nil
+    ) -> GameCenterManager.TurnTimerSnapshot? {
+        guard isOnlineMatch else { return nil }
+        let now = Date()
+
+        if let forced = forceRemaining {
+            var blackRemaining = moveTimeLimit
+            var whiteRemaining = moveTimeLimit
+            if actingPlayer == .black {
+                blackRemaining = forced
+                blackTimeRemaining = forced
+            } else {
+                whiteRemaining = forced
+                whiteTimeRemaining = forced
+            }
+            baseBlackRemaining = blackRemaining
+            baseWhiteRemaining = whiteRemaining
+            turnStartedAt = now
+            return GameCenterManager.TurnTimerSnapshot(
+                blackRemaining: blackRemaining,
+                whiteRemaining: whiteRemaining,
+                turnStartedAt: now
+            )
+        }
+
+        // Per-move timer: next player's turn always starts full.
+        baseBlackRemaining = moveTimeLimit
+        baseWhiteRemaining = moveTimeLimit
+        blackTimeRemaining = moveTimeLimit
+        whiteTimeRemaining = moveTimeLimit
+        turnStartedAt = now
+        return GameCenterManager.TurnTimerSnapshot(
+            blackRemaining: moveTimeLimit,
+            whiteRemaining: moveTimeLimit,
+            turnStartedAt: now
+        )
+    }
+
     private func tickTimer() {
         guard !isGameOver else { return }
         guard !isWaitingForOpponent else { return }
+        if isOnlineMatch {
+            refreshOnlineTimerRemaining()
+            let remaining = timerRemaining(for: game.currentPlayer)
+            handleClockTickSoundIfNeeded(remaining: remaining, activePlayer: game.currentPlayer)
+            guard remaining > 0 else {
+                if canEnforceTimeoutForActivePlayer {
+                    handleTimeout()
+                }
+                return
+            }
+            return
+        }
+
         let activePlayer = game.currentPlayer
         let remaining = timerRemaining(for: activePlayer)
         guard remaining > 0 else { return }
+
+        handleClockTickSoundIfNeeded(remaining: remaining, activePlayer: activePlayer)
 
         let updated = max(0, remaining - 1)
         setTimerRemaining(updated, for: activePlayer)
@@ -1362,6 +1698,25 @@ struct GameScreenView: View {
             guard canEnforceTimeoutForActivePlayer else { return }
             handleTimeout()
         }
+    }
+
+    private func handleClockTickSoundIfNeeded(remaining: TimeInterval, activePlayer: Player) {
+        guard isSoundEnabled else {
+            lastClockTickSecond = nil
+            return
+        }
+        if isOnlineMatch && !isLocalTurn {
+            lastClockTickSecond = nil
+            return
+        }
+        guard remaining > 0, remaining <= 10 else {
+            lastClockTickSecond = nil
+            return
+        }
+        let second = max(1, Int(ceil(remaining)))
+        guard lastClockTickSecond != second else { return }
+        lastClockTickSecond = second
+        SoundEffects.playClockTick()
     }
 
     private var canEnforceTimeoutForActivePlayer: Bool {
@@ -1382,26 +1737,50 @@ struct GameScreenView: View {
         game.timeoutCurrentPlayer()
 
         if let match = onlineMatch, shouldSubmitTimeout {
-            gameCenter.submitTurn(game: game, match: match)
+            let snapshot = makeTimerSnapshotForSubmission(actingPlayer: game.currentPlayer, forceRemaining: 0)
+            gameCenter.submitTurn(game: game, match: match, timerSnapshot: snapshot)
         }
     }
 
     private func applyMatchUpdateIfNeeded(_ match: GKTurnBasedMatch?) {
+        prepareBoardLoad(for: match)
         guard let match else {
             lastAppliedMatchSignature = ""
+            hasLoadedInitialState = true
+            suppressMatchSounds = false
             return
         }
 
         let signature = matchUpdateSignature(match)
         guard signature != lastAppliedMatchSignature else { return }
         lastAppliedMatchSignature = signature
+        isApplyingMatchUpdate = true
 
         let loadedState = gameCenter.loadState(from: match)
         let fallbackState = game.makeState()
         let effectiveState = resolveEndedMatchState(for: match, loadedState: loadedState, fallbackState: fallbackState)
         game.apply(state: effectiveState)
-        restoreOrResetTimerState()
+        gameCenter.finalizeMatchIfPossible(match, using: effectiveState)
+        if isOnlineMatch {
+            applyOnlineTimerState(from: effectiveState, match: match)
+        } else {
+            restoreOrResetTimerState()
+        }
         replayMoveIndex = game.moves.count
+        hasLoadedInitialState = true
+        suppressMatchSounds = false
+        isApplyingMatchUpdate = false
+    }
+
+    private func prepareBoardLoad(for match: GKTurnBasedMatch?) {
+        let matchID = match?.matchID
+        guard matchID != lastLoadedMatchID else { return }
+        lastLoadedMatchID = matchID
+        initialTurnStartMatchID = nil
+        hasLoadedInitialState = false
+        isBoardCentered = false
+        recenterToken += 1
+        suppressMatchSounds = true
     }
 
     private func matchUpdateSignature(_ match: GKTurnBasedMatch) -> String {
@@ -1419,19 +1798,33 @@ struct GameScreenView: View {
         fallbackState: GameState
     ) -> GameState {
         let base = loadedState ?? fallbackState
-        guard match.status == .ended else { return base }
+        let hasTerminalOutcome = match.participants.contains { participant in
+            switch participant.matchOutcome {
+            case .won, .lost, .quit, .timeExpired, .tied:
+                return true
+            case .none:
+                return false
+            @unknown default:
+                return false
+            }
+        }
+        guard match.status == .ended || hasTerminalOutcome else { return base }
         if base.winner != nil || base.isDraw { return base }
 
         if match.participants.contains(where: { $0.matchOutcome == .tied }) {
             return GameState(
                 board: base.board,
+                moves: base.moves,
                 currentPlayer: base.currentPlayer,
                 winner: nil,
                 isDraw: true,
                 lastMove: base.lastMove,
                 winningLine: nil,
                 partyCode: base.partyCode,
-                playerSymbolPreferences: base.playerSymbolPreferences
+                playerSymbolPreferences: base.playerSymbolPreferences,
+                blackTimeRemaining: base.blackTimeRemaining,
+                whiteTimeRemaining: base.whiteTimeRemaining,
+                turnStartedAt: base.turnStartedAt
             )
         }
 
@@ -1439,13 +1832,17 @@ struct GameScreenView: View {
             let winner: Player = winnerIndex == 0 ? .black : .white
             return GameState(
                 board: base.board,
+                moves: base.moves,
                 currentPlayer: base.currentPlayer,
                 winner: winner,
                 isDraw: false,
                 lastMove: base.lastMove,
                 winningLine: base.winningLine,
                 partyCode: base.partyCode,
-                playerSymbolPreferences: base.playerSymbolPreferences
+                playerSymbolPreferences: base.playerSymbolPreferences,
+                blackTimeRemaining: base.blackTimeRemaining,
+                whiteTimeRemaining: base.whiteTimeRemaining,
+                turnStartedAt: base.turnStartedAt
             )
         }
 
@@ -1455,13 +1852,17 @@ struct GameScreenView: View {
             let winner: Player = loserIndex == 0 ? .white : .black
             return GameState(
                 board: base.board,
+                moves: base.moves,
                 currentPlayer: base.currentPlayer,
                 winner: winner,
                 isDraw: false,
                 lastMove: base.lastMove,
                 winningLine: base.winningLine,
                 partyCode: base.partyCode,
-                playerSymbolPreferences: base.playerSymbolPreferences
+                playerSymbolPreferences: base.playerSymbolPreferences,
+                blackTimeRemaining: base.blackTimeRemaining,
+                whiteTimeRemaining: base.whiteTimeRemaining,
+                turnStartedAt: base.turnStartedAt
             )
         }
 
@@ -1484,6 +1885,7 @@ struct GameScreenView: View {
             if gameCenter.isFindingMatch {
                 gameCenter.cancelMatchmaking()
             }
+            abandonPendingMatchIfNeeded()
             gameCenter.currentMatch = nil
         } else if isDebugMatch {
             gameCenter.isDebugMatchActive = false
@@ -1495,8 +1897,38 @@ struct GameScreenView: View {
         if gameCenter.isFindingMatch {
             gameCenter.cancelMatchmaking()
         }
+        abandonPendingMatchIfNeeded()
         gameCenter.currentMatch = nil
         dismiss()
+    }
+
+    private func abandonPendingMatchIfNeeded() {
+        if let match = gameCenter.currentMatch, isPendingMatch(match) {
+            let matchID = match.matchID
+            if !matchID.isEmpty {
+                gameCenter.activeMatches.removeAll { $0.matchID == matchID }
+                gameCenter.finishedMatches.removeAll { $0.matchID == matchID }
+            } else {
+                gameCenter.activeMatches.removeAll { !gameCenter.isMatchReady($0) }
+            }
+            gameCenter.currentMatch = nil
+            gameCenter.removeMatch(match)
+            return
+        }
+
+        // Fallback: clear any pending matches from cache to avoid overlay flicker.
+        gameCenter.activeMatches.removeAll { !gameCenter.isMatchReady($0) }
+    }
+
+    private func isPendingMatch(_ match: GKTurnBasedMatch) -> Bool {
+        if match.status == .matching {
+            return true
+        }
+        if match.status == .open {
+            let playerCount = match.participants.filter { $0.player != nil }.count
+            return playerCount < 2
+        }
+        return false
     }
 
     private func startRematch() {
@@ -1511,6 +1943,12 @@ struct GameScreenView: View {
     }
 
     private func handleTurnTransition() {
+        if isOnlineMatch {
+            if isApplyingMatchUpdate { return }
+            // For online matches, the authoritative timer state arrives with match data.
+            // Local turn transitions are captured when submitting the turn.
+            return
+        }
         let token = currentTurnToken
         if token == timerTurnToken {
             return
@@ -1521,6 +1959,7 @@ struct GameScreenView: View {
     }
 
     private func restoreOrResetTimerState() {
+        guard !isOnlineMatch else { return }
         let token = currentTurnToken
         if let restored = loadPersistedTimerState(), restored.turnToken == token {
             var black = restored.blackRemaining
@@ -1565,6 +2004,7 @@ struct GameScreenView: View {
     }
 
     private func persistTimerState() {
+        guard !isOnlineMatch else { return }
         guard !timerTurnToken.isEmpty else { return }
         let payload = PersistedTimerState(
             turnToken: timerTurnToken,
@@ -1592,6 +2032,7 @@ struct GameScreenView: View {
 
     private func shouldShowRematchButton(for player: Player) -> Bool {
         guard isGameOver else { return false }
+        guard !isReplayActive else { return false }
         guard !isWaitingForOpponent else { return false }
         if isOnlineMatch {
             return isLocalPlayer(player)

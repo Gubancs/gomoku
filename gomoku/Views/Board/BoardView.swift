@@ -20,6 +20,7 @@ struct BoardView: View {
     var lastMoveOverride: LastMove? = nil
     var blackSymbolOverride: StoneSymbolOption? = nil
     var whiteSymbolOverride: StoneSymbolOption? = nil
+    var showWinningLine: Bool = true
 
     var body: some View {
         let board = boardOverride ?? game.board
@@ -62,7 +63,7 @@ struct BoardView: View {
                 .allowsHitTesting(false)
             
             // Draw winning line overlay
-            if let winningLine = game.winningLine {
+            if showWinningLine, let winningLine = game.winningLine {
                 WinningLineView(
                     winningLine: winningLine,
                     cellSize: cellSize,

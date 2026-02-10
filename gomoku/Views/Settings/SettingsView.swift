@@ -160,9 +160,7 @@ struct SettingsView: View {
         !symbolsLocked
     }
 
-    private var symbolGridColumns: [GridItem] {
-        Array(repeating: GridItem(.flexible(minimum: 34), spacing: 8), count: 5)
-    }
+    private let symbolButtonSize: CGFloat = 34
 
     private func symbolGridRow(
         title: String,
@@ -174,39 +172,41 @@ struct SettingsView: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(sectionHeaderText)
 
-            LazyVGrid(columns: symbolGridColumns, spacing: 8) {
-                ForEach(StoneSymbolConfiguration.selectableOptions) { option in
-                    let isActive = selection.wrappedValue == option.rawValue
-                    Button {
-                        guard canEditSymbols else { return }
-                        selection.wrappedValue = option.rawValue
-                    } label: {
-                        Text(option.glyph)
-                            .font(.title3.weight(.bold))
-                            .foregroundStyle(StoneSymbolConfiguration.displayColor(for: player, colorScheme: colorScheme))
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 42)
-                            .background(
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(
-                                        isActive
-                                            ? accentBlue.opacity(colorScheme == .dark ? 0.35 : 0.20)
-                                            : Color.white.opacity(colorScheme == .dark ? 0.08 : 0.58)
-                                    )
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .stroke(
-                                        isActive
-                                            ? accentBlue.opacity(0.95)
-                                            : Color.black.opacity(colorScheme == .dark ? 0.22 : 0.10),
-                                        lineWidth: isActive ? 2 : 1
-                                    )
-                            )
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 8) {
+                    ForEach(StoneSymbolConfiguration.selectableOptions) { option in
+                        let isActive = selection.wrappedValue == option.rawValue
+                        Button {
+                            guard canEditSymbols else { return }
+                            selection.wrappedValue = option.rawValue
+                        } label: {
+                            Text(option.glyph)
+                                .font(.title3.weight(.bold))
+                                .foregroundStyle(StoneSymbolConfiguration.displayColor(for: player, colorScheme: colorScheme))
+                                .frame(width: symbolButtonSize, height: symbolButtonSize)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                        .fill(
+                                            isActive
+                                                ? accentBlue.opacity(colorScheme == .dark ? 0.35 : 0.20)
+                                                : Color.white.opacity(colorScheme == .dark ? 0.08 : 0.58)
+                                        )
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                        .stroke(
+                                            isActive
+                                                ? accentBlue.opacity(0.95)
+                                                : Color.black.opacity(colorScheme == .dark ? 0.22 : 0.10),
+                                            lineWidth: isActive ? 2 : 1
+                                        )
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!canEditSymbols)
                     }
-                    .buttonStyle(.plain)
-                    .disabled(!canEditSymbols)
                 }
+                .padding(.vertical, 2)
             }
         }
     }

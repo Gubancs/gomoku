@@ -10,6 +10,7 @@ struct OnlineScreenView: View {
     @State private var isOfflineSetupPresented: Bool = false
     @State private var isJoinPartyPresented: Bool = false
     @State private var isLeaderboardsPresented: Bool = false
+    @State private var isFinishedMatchesPresented: Bool = false
     @State private var joinPartyCode: String = ""
     @State private var presenceCount: Int?
     @FocusState private var isJoinCodeFieldFocused: Bool
@@ -21,14 +22,10 @@ struct OnlineScreenView: View {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 22) {
                     header
-                    partyCodeBanner
 
                     OnlineDashboardView(
                         gameCenter: gameCenter,
-                        onStartMatch: gameCenter.startMatchmaking,
-                        onOpenLeaderboards: {
-                            isLeaderboardsPresented = true
-                        },
+                        onStartMatch: gameCenter.presentMatchmaking,
                         onStartPartyHost: {
                             gameCenter.startPartyHostMatchmaking()
                         },
@@ -44,17 +41,22 @@ struct OnlineScreenView: View {
                     )
                 }
                 .padding(.horizontal, 18)
-                .padding(.vertical, 24)
+                .padding(.top, 8)
+                .padding(.bottom, 24)
             }
             .refreshable {
                 gameCenter.loadMatches()
                 gameCenter.refreshLeaderboard()
                 await refreshPresence()
             }
-            .overlay {
-                if gameCenter.isFindingMatch {
-                    matchmakingOverlay
+
+            if let match = primaryActiveMatch {
+                VStack {
+                    Spacer()
+                    activeMatchOverlay(match: match)
                 }
+                .padding(.horizontal, 18)
+                .padding(.bottom, 16)
             }
         }
         .toolbar {
@@ -64,10 +66,10 @@ struct OnlineScreenView: View {
                     .lineLimit(1)
             }
             ToolbarItemGroup(placement: .navigationBarTrailing) {
-                NavigationLink {
-                    SettingsView()
+                Button {
+                    isFinishedMatchesPresented = true
                 } label: {
-                    Image(systemName: "gearshape")
+                    Image(systemName: "clock.arrow.circlepath")
                         .font(.system(size: 14, weight: .semibold))
                         .symbolRenderingMode(.hierarchical)
                 }
@@ -95,6 +97,11 @@ struct OnlineScreenView: View {
         .navigationDestination(isPresented: $isLeaderboardsPresented) {
             LeaderboardsView(gameCenter: gameCenter)
         }
+        .navigationDestination(isPresented: $isFinishedMatchesPresented) {
+            FinishedMatchesListView { match in
+                gameCenter.handleMatchSelected(match)
+            }
+        }
         .task {
             await refreshPresence()
             startPresenceAutoRefresh()
@@ -106,6 +113,48 @@ struct OnlineScreenView: View {
             return "Online: \(presenceCount)"
         }
         return "Online"
+    }
+
+    private var sortedActiveMatches: [GKTurnBasedMatch] {
+        gameCenter.sortedMatchesForDisplay(gameCenter.activeMatches)
+    }
+
+    private var primaryActiveMatch: GKTurnBasedMatch? {
+        sortedActiveMatches.first
+    }
+
+    private func activeMatchOverlay(match: GKTurnBasedMatch) -> some View {
+        Button {
+            gameCenter.handleMatchSelected(match)
+        } label: {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("Active Match")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    Spacer()
+
+                    Text("Tap to open")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+
+                MatchRowView(match: match)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(colorScheme == .dark ? Color.white.opacity(0.20) : Color.black.opacity(0.08), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     private func startPresenceAutoRefresh() {
@@ -212,18 +261,46 @@ struct OnlineScreenView: View {
                         isJoinPartyPresented = false
                         joinPartyCode = ""
                     }
-                    .buttonStyle(.bordered)
-                    .frame(maxWidth: .infinity)
+                    .font(.headline.weight(.semibold))
+                    .frame(maxWidth: .infinity, minHeight: 50)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(Color.white.opacity(colorScheme == .dark ? 0.10 : 0.70))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(Color.black.opacity(colorScheme == .dark ? 0.18 : 0.10), lineWidth: 1)
+                    )
+                    .foregroundStyle(colorScheme == .dark ? Color.white.opacity(0.9) : Color.black.opacity(0.85))
+                    .buttonStyle(.plain)
 
                     Button("Join") {
                         isJoinPartyPresented = false
                         gameCenter.startPartyJoinMatchmaking(code: joinPartyCode)
                         joinPartyCode = ""
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Color(red: 0.26, green: 0.50, blue: 0.88))
+                    .font(.headline.weight(.semibold))
+                    .frame(maxWidth: .infinity, minHeight: 50)
+                    .background(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.26, green: 0.50, blue: 0.88),
+                                Color(red: 0.20, green: 0.40, blue: 0.78)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(Color.white.opacity(0.45), lineWidth: 1)
+                    )
+                    .foregroundStyle(.white)
+                    .shadow(color: Color.black.opacity(0.18), radius: 8, x: 0, y: 6)
                     .disabled(joinPartyCode.trimmingCharacters(in: .whitespacesAndNewlines).count != 4)
-                    .frame(maxWidth: .infinity)
+                    .opacity(joinPartyCode.trimmingCharacters(in: .whitespacesAndNewlines).count == 4 ? 1 : 0.6)
+                    .buttonStyle(.plain)
                 }
             }
             .padding(.horizontal, 20)
@@ -236,43 +313,6 @@ struct OnlineScreenView: View {
             .shadow(color: Color.black.opacity(0.12), radius: 16, x: 0, y: 8)
             .padding(.horizontal, 14)
             .padding(.vertical, 16)
-        }
-    }
-
-    @ViewBuilder
-    private var partyCodeBanner: some View {
-        if let code = gameCenter.partyCode, !code.isEmpty {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Party Code")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-
-                HStack(spacing: 10) {
-                    Text(code)
-                        .font(.system(size: 24, weight: .bold, design: .monospaced))
-                        .tracking(2)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-
-                    Spacer(minLength: 0)
-
-                    Button {
-                        UIPasteboard.general.string = code
-                    } label: {
-                        Label("Copy", systemImage: "doc.on.doc")
-                            .font(.caption.weight(.semibold))
-                    }
-                    .buttonStyle(.bordered)
-                }
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.black.opacity(0.08), lineWidth: 1)
-            )
         }
     }
 
@@ -293,138 +333,6 @@ struct OnlineScreenView: View {
         )
         .ignoresSafeArea()
     }
-
-    private var matchmakingOverlay: some View {
-        ZStack {
-            Color.black.opacity(0.2)
-                .ignoresSafeArea()
-
-            VStack(spacing: 12) {
-                ProgressView()
-                    .progressViewStyle(.circular)
-                    .scaleEffect(1.2)
-
-                Text("Finding opponent...")
-                    .font(.headline)
-
-                Text("We will start the match as soon as someone joins.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-
-                if let code = gameCenter.partyCode, !code.isEmpty {
-                    VStack(spacing: 6) {
-                        Text("Share this party code:")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text(code)
-                            .font(.system(size: 28, weight: .bold, design: .monospaced))
-                            .tracking(3)
-                    }
-                    .padding(.top, 2)
-                }
-
-#if DEBUG
-                if !matchmakingDebugLines.isEmpty {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("GC env: \(gameCenter.gameCenterEnvironmentName)")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        Text("Team ID: \(gameCenter.teamIdentifier ?? "-")")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        Text("App ID: \(gameCenter.appIdentifierPrefix)")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        Text("Restricted: \(gameCenter.isMultiplayerRestricted ? "yes" : "no") / Underage: \(gameCenter.isUnderage ? "yes" : "no")")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        ForEach(matchmakingDebugLines, id: \.self) { line in
-                            Text(line)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-                    .padding(.top, 6)
-                }
-#endif
-
-                Button("Cancel Search") {
-                    gameCenter.cancelMatchmaking()
-                }
-                .buttonStyle(.bordered)
-                .tint(colorScheme == .dark
-                    ? Color(red: 0.78, green: 0.84, blue: 0.95)
-                    : .black.opacity(0.75)
-                )
-            }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 20)
-            .frame(maxWidth: 320)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(Color.black.opacity(0.08), lineWidth: 1)
-            )
-            .shadow(color: Color.black.opacity(0.12), radius: 18, x: 0, y: 8)
-        }
-    }
-
-#if DEBUG
-    private var matchmakingDebugLines: [String] {
-        var lines: [String] = []
-        lines.append("pending: \(shortMatchID(gameCenter.pendingAutoMatchID))")
-        if let pendingMatch = gameCenter.pendingAutoMatch {
-            let status = pendingMatch.status
-            let playerCount = pendingMatch.participants.filter { $0.player != nil }.count
-            lines.append("pending status: \(statusLabel(status)) | players: \(playerCount)")
-        }
-        if let code = gameCenter.partyCode {
-            lines.append("party code: \(code)")
-        }
-        if let group = gameCenter.currentPlayerGroup {
-            lines.append("party group: \(group)")
-        }
-        if let started = gameCenter.matchmakingStartedAt {
-            lines.append("started: \(formattedTime(started))")
-        }
-        if let missing = gameCenter.pendingAutoMatchMissingSince {
-            lines.append("missing since: \(formattedTime(missing))")
-        }
-        return lines
-    }
-
-    private func shortMatchID(_ matchID: String?) -> String {
-        guard let matchID, !matchID.isEmpty else { return "-" }
-        if matchID.count <= 8 { return matchID }
-        let start = matchID.prefix(4)
-        let end = matchID.suffix(4)
-        return "\(start)...\(end)"
-    }
-
-    private func formattedTime(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .none
-        formatter.timeStyle = .medium
-        return formatter.string(from: date)
-    }
-
-    private func statusLabel(_ status: GKTurnBasedMatch.Status) -> String {
-        switch status {
-        case .unknown:
-            return "unknown"
-        case .open:
-            return "open"
-        case .matching:
-            return "matching"
-        case .ended:
-            return "ended"
-        @unknown default:
-            return "unknown"
-        }
-    }
-#endif
 
     private func normalizedJoinCode(_ value: String) -> String {
         let allowed = CharacterSet(charactersIn: "ABCDEFGHJKLMNPQRSTUVWXYZ23456789")

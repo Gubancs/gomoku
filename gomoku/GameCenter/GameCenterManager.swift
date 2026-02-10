@@ -31,6 +31,7 @@ final class GameCenterManager: NSObject, ObservableObject {
     @Published var isDebugMatchActive: Bool = false
     @Published var finishedMatchesCount: Int = 0
     @Published var isPurgingFinishedMatches: Bool = false
+    @Published var cancelCooldownUntil: Date?
     @Published var partyCode: String?
     @Published var isPartyMode: Bool = false
     @Published var partyError: String?
@@ -47,6 +48,7 @@ final class GameCenterManager: NSObject, ObservableObject {
     let processedHeadToHeadMatchesKey = "gomoku.h2h.processedMatches"
     let defaultEloRating = 1500
     let eloKFactor = 32
+    let defaultMoveTimeLimit: TimeInterval = 60
     let headToHeadStore = HeadToHeadCloudKitStore()
     let presenceStore = PresenceCloudKitStore()
     let rematchStore = RematchCloudKitStore()
@@ -70,12 +72,16 @@ final class GameCenterManager: NSObject, ObservableObject {
     var rematchStartAttemptedMatchIDs: Set<String> = []
     var rematchDeclineNotifiedMatchIDs: Set<String> = []
     var rematchSyncTask: Task<Void, Never>?
+    var lastLocalEloUpdateAt: Date?
+    var lastSubmittedEloRating: Int?
+    var localEloSyncGraceInterval: TimeInterval = 120
     var matchStatusPollTimer: Timer?
     let matchStatusPollInterval: TimeInterval = 5.0
     // Minimal automatch flow: do not churn fresh pending matches.
     let pendingMatchStallTimeout: TimeInterval = 90
     let pendingMatchMissingTimeout: TimeInterval = 90
     let matchAdoptionWindow: TimeInterval = 180
+    let partyHandshakeGraceInterval: TimeInterval = 45
     var inboxPollTimer: Timer?
     let inboxPollInterval: TimeInterval = 8.0
     let presenceHeartbeatInterval: TimeInterval = 10.0
@@ -85,6 +91,12 @@ final class GameCenterManager: NSObject, ObservableObject {
         let opponentDelta: Int
         let localRating: Int
         let opponentRating: Int
+    }
+
+    struct TurnTimerSnapshot {
+        let blackRemaining: TimeInterval
+        let whiteRemaining: TimeInterval
+        let turnStartedAt: Date
     }
 
     init(leaderboardID: String = "gomoku.points") {
@@ -198,6 +210,24 @@ final class GameCenterManager: NSObject, ObservableObject {
         startMatchmaking(partyGroup: nil, partyCode: nil, partyRole: .none)
     }
 
+    func presentMatchmaking() {
+        guard isAuthenticated else { return }
+        if isMultiplayerRestricted {
+            lastError = "Game Center multiplayer is restricted for this account."
+            return
+        }
+        if currentMatch == nil,
+           let existing = sortedMatchesForDisplay(activeMatches).first {
+            currentMatch = existing
+            isFindingMatch = false
+            return
+        }
+        isFindingMatch = true
+        DispatchQueue.main.async { [weak self] in
+            self?.startMatchmaking()
+        }
+    }
+
     func startPartyHostMatchmaking() {
         let code = generatePartyCode()
         guard let group = stablePartyGroup(for: code) else {
@@ -235,12 +265,24 @@ final class GameCenterManager: NSObject, ObservableObject {
             lastError = "Game Center multiplayer is restricted for this account."
             return
         }
+        if currentMatch == nil,
+           let existing = sortedMatchesForDisplay(activeMatches).first {
+            currentMatch = existing
+            isFindingMatch = false
+            return
+        }
         debugLog("startMatchmaking env=\(gameCenterEnvironmentName) bundle=\(bundleIdentifier) version=\(appVersion) build=\(buildNumber) device=\(deviceDebugName)")
         lastError = nil
         cancelPendingAutoMatchRetry()
         bootstrapPendingMatchIDs.removeAll()
         rejectedPartyMatchIDs.removeAll()
         isFindingMatch = true
+        let now = Date()
+        if let existing = cancelCooldownUntil, existing > now {
+            // Keep existing cooldown.
+        } else {
+            cancelCooldownUntil = now.addingTimeInterval(5)
+        }
         isPartyMode = partyGroup != nil
         self.partyCode = partyCode
         self.partyRole = partyRole
@@ -267,6 +309,7 @@ final class GameCenterManager: NSObject, ObservableObject {
         bootstrapPendingMatchIDs.removeAll()
         rejectedPartyMatchIDs.removeAll()
         isFindingMatch = false
+        cancelCooldownUntil = nil
         matchmakingStartedAt = nil
         pendingAutoMatchMissingSince = nil
         isPartyMode = false
@@ -323,13 +366,32 @@ final class GameCenterManager: NSObject, ObservableObject {
     }
 
     func handleMatchSelected(_ match: GKTurnBasedMatch) {
+        let matchPartyCode = loadState(from: match)?.partyCode?.uppercased()
+        if matchPartyCode == nil {
+            if partyCode == nil {
+                isPartyMode = false
+                partyRole = .none
+                currentPlayerGroup = nil
+            }
+        } else if !isPartyMode {
+            isPartyMode = true
+            partyCode = matchPartyCode
+            partyRole = .none
+            currentPlayerGroup = matchPartyCode.flatMap { stablePartyGroup(for: $0) }
+        }
+
         switch validatePartyMatch(match) {
         case .valid:
             break
         case .pending:
             partyError = "Waiting for party authorization handshake..."
-            return
+            if isPartyMode {
+                bootstrapPendingMatchIfNeeded(match, source: "resume", force: true)
+            }
         case let .invalid(reason):
+            if !isPartyMode {
+                break
+            }
             rejectPartyMatch(match, reason: reason)
             return
         }
@@ -341,6 +403,7 @@ final class GameCenterManager: NSObject, ObservableObject {
 
         currentMatch = match
         isFindingMatch = false
+        cancelCooldownUntil = nil
         isAwaitingRematch = false
         matchmakingStartedAt = nil
         pendingAutoMatchMissingSince = nil
@@ -368,16 +431,18 @@ final class GameCenterManager: NSObject, ObservableObject {
     }
 
     func isLocalPlayersTurn(in match: GKTurnBasedMatch) -> Bool {
-        let localID = GKLocalPlayer.local.gamePlayerID
         if let current = match.currentParticipant?.player?.gamePlayerID {
-            return current == localID
+            return isLocalPlayerID(current)
+        }
+        if let currentTeam = match.currentParticipant?.player?.teamPlayerID {
+            return isLocalPlayerID(currentTeam)
         }
 
         // Some freshly created automatch games can transiently report nil currentParticipant.
         // If only the local player is assigned so far, allow opening move submission.
         let assignedParticipants = match.participants.filter { $0.player != nil }
         guard assignedParticipants.count == 1 else { return false }
-        return assignedParticipants.first?.player?.gamePlayerID == localID
+        return isLocalParticipant(assignedParticipants.first)
     }
 
     var isCurrentMatchReady: Bool {
@@ -387,8 +452,8 @@ final class GameCenterManager: NSObject, ObservableObject {
         return isMatchReady(match) || match.status == .ended
     }
 
-    func submitTurn(game: GomokuGame, match: GKTurnBasedMatch) {
-        guard let data = encodedStateForSubmission(from: game) else { return }
+    func submitTurn(game: GomokuGame, match: GKTurnBasedMatch, timerSnapshot: TurnTimerSnapshot? = nil) {
+        guard let data = encodedStateForSubmission(from: game, timerSnapshot: timerSnapshot) else { return }
 
         if let winner = game.winner {
             finishMatch(match, data: data, winner: winner)
@@ -432,9 +497,9 @@ final class GameCenterManager: NSObject, ObservableObject {
         )
     }
 
-    func resignCurrentMatch(using game: GomokuGame, shouldClearCurrentMatch: Bool = true, completion: ((Bool) -> Void)? = nil) {
+    func resignCurrentMatch(using game: GomokuGame, timerSnapshot: TurnTimerSnapshot? = nil, shouldClearCurrentMatch: Bool = true, completion: ((Bool) -> Void)? = nil) {
         guard let match = currentMatch else { return }
-        let data = encodedStateForSubmission(from: game) ?? Data()
+        let data = encodedStateForSubmission(from: game, timerSnapshot: timerSnapshot) ?? Data()
 
         if isLocalPlayersTurn(in: match),
            let nextParticipant = nextActiveParticipant(after: match.currentParticipant, in: match) {
@@ -758,56 +823,78 @@ final class GameCenterManager: NSObject, ObservableObject {
         }
     }
 
-    private func encodedStateForSubmission(from game: GomokuGame) -> Data? {
+    func finalizeMatchIfPossible(_ match: GKTurnBasedMatch, using state: GameState) {
+        guard match.status != .ended else { return }
+        guard isLocalPlayersTurn(in: match) else { return }
+        guard state.winner != nil || state.isDraw else { return }
+        guard let data = state.encoded() else { return }
+        finishMatch(match, data: data, winner: state.winner)
+    }
+
+    private func encodedStateForSubmission(from game: GomokuGame, timerSnapshot: TurnTimerSnapshot? = nil) -> Data? {
         let state = game.makeState()
         var mergedSymbolPreferences = state.playerSymbolPreferences
         let localPlayerID = GKLocalPlayer.local.gamePlayerID
         if !localPlayerID.isEmpty {
             mergedSymbolPreferences[localPlayerID] = localPlayerSymbolPreferences()
         }
+        let blackRemaining = timerSnapshot?.blackRemaining ?? state.blackTimeRemaining
+        let whiteRemaining = timerSnapshot?.whiteRemaining ?? state.whiteTimeRemaining
+        let startedAt = timerSnapshot?.turnStartedAt.timeIntervalSince1970 ?? state.turnStartedAt
 
         guard isPartyMode, let code = partyCode?.uppercased(), !code.isEmpty else {
             let syncedState = GameState(
                 board: state.board,
+                moves: state.moves,
                 currentPlayer: state.currentPlayer,
                 winner: state.winner,
                 isDraw: state.isDraw,
                 lastMove: state.lastMove,
                 winningLine: state.winningLine,
                 partyCode: state.partyCode,
-                playerSymbolPreferences: mergedSymbolPreferences
+                playerSymbolPreferences: mergedSymbolPreferences,
+                blackTimeRemaining: blackRemaining,
+                whiteTimeRemaining: whiteRemaining,
+                turnStartedAt: startedAt
             )
             return syncedState.encoded()
         }
         if state.partyCode?.uppercased() == code {
             let syncedState = GameState(
                 board: state.board,
+                moves: state.moves,
                 currentPlayer: state.currentPlayer,
                 winner: state.winner,
                 isDraw: state.isDraw,
                 lastMove: state.lastMove,
                 winningLine: state.winningLine,
                 partyCode: state.partyCode,
-                playerSymbolPreferences: mergedSymbolPreferences
+                playerSymbolPreferences: mergedSymbolPreferences,
+                blackTimeRemaining: blackRemaining,
+                whiteTimeRemaining: whiteRemaining,
+                turnStartedAt: startedAt
             )
             return syncedState.encoded()
         }
         let securedState = GameState(
             board: state.board,
+            moves: state.moves,
             currentPlayer: state.currentPlayer,
             winner: state.winner,
             isDraw: state.isDraw,
             lastMove: state.lastMove,
             winningLine: state.winningLine,
             partyCode: code,
-            playerSymbolPreferences: mergedSymbolPreferences
+            playerSymbolPreferences: mergedSymbolPreferences,
+            blackTimeRemaining: blackRemaining,
+            whiteTimeRemaining: whiteRemaining,
+            turnStartedAt: startedAt
         )
         return securedState.encoded()
     }
 
     func isLocalParticipantInvited(in match: GKTurnBasedMatch) -> Bool {
-        let localID = GKLocalPlayer.local.gamePlayerID
-        guard let localParticipant = match.participants.first(where: { $0.player?.gamePlayerID == localID }) else {
+        guard let localParticipant = match.participants.first(where: { isLocalParticipant($0) }) else {
             return false
         }
         return localParticipant.status == .invited
@@ -857,7 +944,7 @@ final class GameCenterManager: NSObject, ObservableObject {
 
     private func localParticipantIndex(in match: GKTurnBasedMatch) -> Int? {
         match.participants.firstIndex { participant in
-            participant.player?.gamePlayerID == GKLocalPlayer.local.gamePlayerID
+            isLocalParticipant(participant)
         }
     }
 
@@ -904,6 +991,7 @@ final class GameCenterManager: NSObject, ObservableObject {
             pendingAutoMatchID = nil
             cancelPendingAutoMatchRetry()
             isFindingMatch = false
+            cancelCooldownUntil = nil
             matchmakingStartedAt = nil
             pendingAutoMatchMissingSince = nil
             stopMatchStatusPollingIfIdle()
@@ -1786,6 +1874,9 @@ final class GameCenterManager: NSObject, ObservableObject {
     }
 
     private func validatePartyMatch(_ match: GKTurnBasedMatch) -> PartyMatchValidation {
+        if match.status == .ended {
+            return .valid
+        }
         guard isPartyMode else { return .valid }
         guard let expectedCode = partyCode, !expectedCode.isEmpty else {
             return .invalid("Party mode is missing a valid code.")
@@ -1804,6 +1895,12 @@ final class GameCenterManager: NSObject, ObservableObject {
         }
 
         if isMatchPending(match) {
+            return .pending
+        }
+
+        // Allow a short grace window for the bootstrap/handshake to land on ready matches.
+        let firstSeen = observedDate(for: match)
+        if Date().timeIntervalSince(firstSeen) < partyHandshakeGraceInterval {
             return .pending
         }
 
@@ -1842,11 +1939,11 @@ final class GameCenterManager: NSObject, ObservableObject {
     // MARK: - Debug helpers
 
     #if DEBUG
-    private func debugLog(_ message: String) {
+    func debugLog(_ message: String) {
         print("[MM] \(message)")
     }
     #else
-    private func debugLog(_ message: String) { }
+    func debugLog(_ message: String) { }
     #endif
 
     private func matchSummary(_ match: GKTurnBasedMatch) -> String {
@@ -1894,6 +1991,31 @@ final class GameCenterManager: NSObject, ObservableObject {
         return "\(id.prefix(4))...\(id.suffix(4))"
     }
 
+    private func isLocalPlayerID(_ id: String?) -> Bool {
+        guard let id, !id.isEmpty else { return false }
+        return localPlayerIDSet.contains(id)
+    }
+
+    func isLocalParticipant(_ participant: GKTurnBasedParticipant?) -> Bool {
+        guard let participant, let player = participant.player else { return false }
+        if isLocalPlayerID(player.gamePlayerID) { return true }
+        if let teamID = player.teamPlayerID, isLocalPlayerID(teamID) { return true }
+        return false
+    }
+
+    private var localPlayerIDSet: Set<String> {
+        let local = GKLocalPlayer.local
+        var ids = Set<String>()
+        let gameID = local.gamePlayerID
+        if !gameID.isEmpty {
+            ids.insert(gameID)
+        }
+        if let teamID = local.teamPlayerID, !teamID.isEmpty {
+            ids.insert(teamID)
+        }
+        return ids
+    }
+
     private func refreshObservedMatchDates(with matches: [GKTurnBasedMatch]) {
         let now = Date()
         var activeIDs = Set<String>()
@@ -1926,8 +2048,8 @@ final class GameCenterManager: NSObject, ObservableObject {
         return matches.sorted { observedDate(for: $0) > observedDate(for: $1) }
     }
 
-    private func bootstrapPendingMatchIfNeeded(_ match: GKTurnBasedMatch, source: String) {
-        guard isFindingMatch else {
+    private func bootstrapPendingMatchIfNeeded(_ match: GKTurnBasedMatch, source: String, force: Bool = false) {
+        guard force || isFindingMatch else {
             debugLog("bootstrap skip \(shortID(match.matchID)) source=\(source): not finding")
             return
         }
@@ -1940,9 +2062,11 @@ final class GameCenterManager: NSObject, ObservableObject {
             debugLog("bootstrap skip \(shortID(match.matchID)) source=\(source): assignedParticipants=\(assignedParticipants.count)")
             return
         }
-        guard isLocalPlayersTurn(in: match) else {
-            debugLog("bootstrap skip \(shortID(match.matchID)) source=\(source): local is not current participant")
-            return
+        if match.currentParticipant != nil {
+            guard isLocalPlayersTurn(in: match) else {
+                debugLog("bootstrap skip \(shortID(match.matchID)) source=\(source): local is not current participant")
+                return
+            }
         }
 
         let matchID = match.matchID
@@ -1967,13 +2091,17 @@ final class GameCenterManager: NSObject, ObservableObject {
                 repeating: Array<Player?>(repeating: nil, count: GomokuGame.boardSize),
                 count: GomokuGame.boardSize
             ),
+            moves: [],
             currentPlayer: nextColor,
             winner: nil,
             isDraw: false,
             lastMove: nil,
             winningLine: nil,
             partyCode: isPartyMode ? partyCode?.uppercased() : nil,
-            playerSymbolPreferences: localPlayerSymbolPreferenceMap()
+            playerSymbolPreferences: localPlayerSymbolPreferenceMap(),
+            blackTimeRemaining: defaultMoveTimeLimit,
+            whiteTimeRemaining: defaultMoveTimeLimit,
+            turnStartedAt: Date().timeIntervalSince1970
         )
         guard let data = bootstrapState.encoded() else { return }
 

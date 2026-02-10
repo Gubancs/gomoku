@@ -108,8 +108,10 @@ struct OfflineMatchSetupView: View {
     private func startGame() {
         guard let selectedBlackID, let selectedWhiteID, selectedBlackID != selectedWhiteID else { return }
         offlinePlayers.selectPlayers(blackID: selectedBlackID, whiteID: selectedWhiteID)
-        gameCenter.isDebugMatchActive = true
         dismiss()
+        DispatchQueue.main.async {
+            gameCenter.isDebugMatchActive = true
+        }
     }
 
     private var background: some View {

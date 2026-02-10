@@ -1,53 +1,92 @@
 import SwiftUI
+@preconcurrency internal import GameKit
 
 struct ContentView: View {
     @EnvironmentObject private var gameCenter: GameCenterManager
     @Environment(\.colorScheme) private var colorScheme
     @StateObject private var offlinePlayers = OfflinePlayersStore()
+    @State private var selectedTab: Tab = .home
+
+    private enum Tab: Hashable {
+        case home
+        case match
+        case leaderboards
+        case settings
+    }
 
     var body: some View {
         ZStack {
             background
 
-            if gameCenter.isAuthenticated {
+            TabView(selection: $selectedTab) {
                 NavigationStack {
-                    OnlineScreenView()
+                    if gameCenter.isAuthenticated {
+                        OnlineScreenView()
+                    } else {
+                        LoginScreenView()
+                    }
                 }
-            } else {
-                LoginScreenView()
+                .tabItem {
+                    Label("Home", systemImage: "house")
+                }
+                .tag(Tab.home)
+
+                if shouldPresentMatch {
+                    NavigationStack {
+                        GameScreenView()
+                            .navigationBarTitleDisplayMode(.inline)
+                    }
+                    .tabItem {
+                        Label("Match", systemImage: "gamecontroller")
+                    }
+                    .tag(Tab.match)
+                }
+
+                NavigationStack {
+                    if gameCenter.isAuthenticated {
+                        LeaderboardsView(gameCenter: gameCenter)
+                    } else {
+                        LoginScreenView()
+                    }
+                }
+                .tabItem {
+                    Label("Leaderboards", systemImage: "list.number")
+                }
+                .tag(Tab.leaderboards)
+
+                NavigationStack {
+                    SettingsView()
+                }
+                .tabItem {
+                    Label("Settings", systemImage: "gearshape")
+                }
+                .tag(Tab.settings)
             }
+            .id(shouldPresentMatch)
+            .tint(tabTintColor)
+            .toolbar(gameCenter.isAuthenticated ? .visible : .hidden, for: .tabBar)
         }
+        .statusBar(hidden: true)
+        .persistentSystemOverlays(.hidden)
         .environmentObject(offlinePlayers)
         .onAppear {
             gameCenter.refreshAuthenticationState()
         }
-        .fullScreenCover(isPresented: matchPresentationBinding) {
-            NavigationStack {
-                GameScreenView()
-                    .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: shouldPresentMatch) { shouldPresent in
+            if shouldPresent {
+                DispatchQueue.main.async {
+                    selectedTab = .match
+                }
+            } else if selectedTab == .match {
+                selectedTab = .home
             }
-            .environmentObject(gameCenter)
-            .environmentObject(offlinePlayers)
         }
     }
 
-    private var matchPresentationBinding: Binding<Bool> {
-        Binding(
-            get: {
-                gameCenter.isDebugMatchActive
-                    || gameCenter.currentMatch != nil
-                    || gameCenter.isFindingMatch
-            },
-            set: { isPresented in
-                if !isPresented {
-                    if gameCenter.isFindingMatch {
-                        gameCenter.cancelMatchmaking()
-                    }
-                    gameCenter.currentMatch = nil
-                    gameCenter.isDebugMatchActive = false
-                }
-            }
-        )
+    private var shouldPresentMatch: Bool {
+        gameCenter.isDebugMatchActive
+            || gameCenter.currentMatch != nil
+            || gameCenter.isFindingMatch
     }
 
     private var background: some View {
@@ -66,6 +105,13 @@ struct ContentView: View {
             endRadius: 700
         )
         .ignoresSafeArea()
+    }
+
+    private var tabTintColor: Color {
+        if selectedTab == .match {
+            return Color(red: 0.20, green: 0.72, blue: 0.40)
+        }
+        return Color(red: 0.26, green: 0.50, blue: 0.88)
     }
 }
 

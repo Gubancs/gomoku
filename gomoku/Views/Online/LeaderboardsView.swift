@@ -21,8 +21,6 @@ struct LeaderboardsView: View {
 
                     if let errorText, !errorText.isEmpty {
                         errorBanner(errorText)
-                    } else if isLoading {
-                        loadingCard
                     } else if rows.isEmpty {
                         emptyCard
                     } else {
@@ -78,22 +76,6 @@ struct LeaderboardsView: View {
         )
     }
 
-    private var loadingCard: some View {
-        VStack(spacing: 10) {
-            ProgressView()
-                .progressViewStyle(.circular)
-            Text("Loading leaderboard...")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(secondaryText)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 24)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.black.opacity(0.08), lineWidth: 1)
-        )
-    }
 
     private var emptyCard: some View {
         VStack(spacing: 8) {
@@ -225,10 +207,13 @@ struct LeaderboardsView: View {
     }
 
     private func initials(for name: String) -> String {
-        let parts = name.split(whereSeparator: \.isWhitespace)
-        let chars = parts.prefix(2).compactMap { $0.first }
-        let value = String(chars).uppercased()
-        return value.isEmpty ? "?" : value
+        let upper = name.uppercased()
+        for scalar in upper.unicodeScalars {
+            if scalar.value >= 65 && scalar.value <= 90 {
+                return String(Character(scalar))
+            }
+        }
+        return "?"
     }
 
     private var background: some View {
@@ -259,6 +244,12 @@ struct LeaderboardsView: View {
         colorScheme == .dark
             ? Color(red: 0.72, green: 0.79, blue: 0.90)
             : Color(red: 0.32, green: 0.34, blue: 0.38)
+    }
+
+    private var accentBlue: Color {
+        colorScheme == .dark
+            ? Color(red: 0.52, green: 0.72, blue: 1.0)
+            : Color(red: 0.26, green: 0.50, blue: 0.88)
     }
 
     @MainActor

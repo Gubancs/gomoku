@@ -6,6 +6,7 @@ struct ZoomableScrollView<Content: View>: UIViewRepresentable {
     let minZoomScale: CGFloat
     let maxZoomScale: CGFloat
     let recenterToken: Int
+    let onCentered: (() -> Void)?
     let content: Content
 
     init(
@@ -13,12 +14,14 @@ struct ZoomableScrollView<Content: View>: UIViewRepresentable {
         minZoomScale: CGFloat,
         maxZoomScale: CGFloat,
         recenterToken: Int,
+        onCentered: (() -> Void)? = nil,
         @ViewBuilder content: () -> Content
     ) {
         _zoomScale = zoomScale
         self.minZoomScale = minZoomScale
         self.maxZoomScale = maxZoomScale
         self.recenterToken = recenterToken
+        self.onCentered = onCentered
         self.content = content()
     }
 
@@ -90,6 +93,7 @@ struct ZoomableScrollView<Content: View>: UIViewRepresentable {
         if context.coordinator.lastRecenterToken != recenterToken {
             context.coordinator.lastRecenterToken = recenterToken
             context.coordinator.pendingForcedCenter = true
+            context.coordinator.didNotifyCenter = false
         }
 
         let hasValidLayout =
@@ -104,6 +108,13 @@ struct ZoomableScrollView<Content: View>: UIViewRepresentable {
         if shouldForceCenter {
             context.coordinator.pendingForcedCenter = false
         }
+
+        if hasValidLayout && !context.coordinator.didNotifyCenter {
+            context.coordinator.didNotifyCenter = true
+            DispatchQueue.main.async {
+                self.onCentered?()
+            }
+        }
     }
 
     /// Coordinator to bridge UIScrollView delegate callbacks.
@@ -116,6 +127,7 @@ struct ZoomableScrollView<Content: View>: UIViewRepresentable {
         var lastBaseSize: CGSize = .zero
         var pendingForcedCenter: Bool = true
         var isZoomingGestureActive: Bool = false
+        var didNotifyCenter: Bool = false
 
         init(_ parent: ZoomableScrollView) {
             self.parent = parent

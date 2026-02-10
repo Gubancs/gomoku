@@ -63,11 +63,11 @@ struct MoveTimerView: View {
 
 #Preview {
     VStack(spacing: 24) {
-        MoveTimerView(timeRemaining: 48, timeLimit: 50, warningThreshold: 30, criticalThreshold: 10)
+        MoveTimerView(timeRemaining: 58, timeLimit: 60, warningThreshold: 40, criticalThreshold: 10)
             .frame(width: 90, height: 90)
-        MoveTimerView(timeRemaining: 24, timeLimit: 50, warningThreshold: 30, criticalThreshold: 10)
+        MoveTimerView(timeRemaining: 30, timeLimit: 60, warningThreshold: 40, criticalThreshold: 10)
             .frame(width: 90, height: 90)
-        MoveTimerView(timeRemaining: 8, timeLimit: 50, warningThreshold: 30, criticalThreshold: 10)
+        MoveTimerView(timeRemaining: 8, timeLimit: 60, warningThreshold: 40, criticalThreshold: 10)
             .frame(width: 90, height: 90)
     }
     .padding()

@@ -31,7 +31,7 @@ enum StoneSizeConfiguration {
     static let scales: [StoneSizeOption: CGFloat] = [
         .small: 0.68,
         .medium: 0.80,
-        .large: 0.98
+        .large: 0.95
     ]
 }
 
@@ -46,6 +46,18 @@ enum StoneSymbolOption: String, CaseIterable, Identifiable {
     case plus
     case spark
     case sun
+    case spade
+    case club
+    case pentagon
+    case hexagon
+    case ring
+    case sparkles
+    case circle
+    case diamondOutline
+    case triangleOutline
+    case squareOutline
+    case star6
+    case cross
 
     var id: String { rawValue }
 
@@ -71,6 +83,30 @@ enum StoneSymbolOption: String, CaseIterable, Identifiable {
             return "✦"
         case .sun:
             return "☀"
+        case .spade:
+            return "♠"
+        case .club:
+            return "♣"
+        case .pentagon:
+            return "⬟"
+        case .hexagon:
+            return "⬢"
+        case .ring:
+            return "◍"
+        case .sparkles:
+            return "✧"
+        case .circle:
+            return "●"
+        case .diamondOutline:
+            return "◇"
+        case .triangleOutline:
+            return "△"
+        case .squareOutline:
+            return "□"
+        case .star6:
+            return "✶"
+        case .cross:
+            return "✚"
         }
     }
 
@@ -96,6 +132,30 @@ enum StoneSymbolOption: String, CaseIterable, Identifiable {
             return "Spark"
         case .sun:
             return "Sun"
+        case .spade:
+            return "Spade"
+        case .club:
+            return "Club"
+        case .pentagon:
+            return "Pentagon"
+        case .hexagon:
+            return "Hexagon"
+        case .ring:
+            return "Ring"
+        case .sparkles:
+            return "Sparkles"
+        case .circle:
+            return "Circle"
+        case .diamondOutline:
+            return "Diamond Outline"
+        case .triangleOutline:
+            return "Triangle Outline"
+        case .squareOutline:
+            return "Square Outline"
+        case .star6:
+            return "Six-Point Star"
+        case .cross:
+            return "Cross"
         }
     }
 
@@ -132,8 +192,7 @@ enum StoneSymbolConfiguration {
     }
 
     static func displayColor(for player: Player, colorScheme: ColorScheme) -> Color {
-        let redPlayer: Player = colorScheme == .dark ? .white : .black
-        if player == redPlayer {
+        if player == .black {
             return Color(red: 0.90, green: 0.22, blue: 0.25)
         }
         return colorScheme == .dark
@@ -162,65 +221,19 @@ struct StoneView: View {
     var body: some View {
         GeometryReader { proxy in
             let size = min(proxy.size.width, proxy.size.height)
-            if usesStoneBase {
-                ZStack {
-                    Circle()
-                        .fill(stoneBackgroundColor)
-                        .overlay(
-                            Circle()
-                                .stroke(stoneBorderColor, lineWidth: max(1, size * 0.035))
-                        )
-                        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.26 : 0.18), radius: size * 0.10, x: 0, y: size * 0.05)
-
-                    Text(selectedSymbol.glyph)
-                        .font(.system(size: size * 0.56, weight: .heavy, design: .rounded))
-                        .minimumScaleFactor(0.35)
-                        .lineLimit(1)
-                        .foregroundStyle(symbolColor)
-                        .frame(width: size, height: size, alignment: .center)
-                }
+            Text(selectedSymbol.glyph)
+                .font(.system(size: size * 0.78, weight: .heavy, design: .rounded))
+                .minimumScaleFactor(0.35)
+                .lineLimit(1)
+                .foregroundStyle(symbolColor)
+                .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.22 : 0.12), radius: size * 0.04, x: 0, y: size * 0.02)
                 .frame(width: size, height: size, alignment: .center)
-            } else {
-                Text(selectedSymbol.glyph)
-                    .font(.system(size: size * 0.78, weight: .heavy, design: .rounded))
-                    .minimumScaleFactor(0.35)
-                    .lineLimit(1)
-                    .foregroundStyle(symbolColor)
-                    .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.22 : 0.12), radius: size * 0.04, x: 0, y: size * 0.02)
-                    .frame(width: size, height: size, alignment: .center)
-            }
         }
         .aspectRatio(1, contentMode: .fit)
     }
 
     private var selectedSymbol: StoneSymbolOption {
         player == .black ? blackSymbol : whiteSymbol
-    }
-
-    private var usesStoneBase: Bool {
-        selectedSymbol == .x || selectedSymbol == .o
-    }
-
-    private var stoneBackgroundColor: Color {
-        switch player {
-        case .black:
-            return colorScheme == .dark
-                ? Color(red: 0.20, green: 0.25, blue: 0.32)
-                : Color(red: 0.16, green: 0.18, blue: 0.22)
-        case .white:
-            return colorScheme == .dark
-                ? Color(red: 0.90, green: 0.92, blue: 0.96)
-                : Color(red: 0.98, green: 0.99, blue: 1.0)
-        }
-    }
-
-    private var stoneBorderColor: Color {
-        switch player {
-        case .black:
-            return Color.white.opacity(colorScheme == .dark ? 0.18 : 0.12)
-        case .white:
-            return Color.black.opacity(colorScheme == .dark ? 0.34 : 0.18)
-        }
     }
 
     private var symbolColor: Color {

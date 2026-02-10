@@ -40,6 +40,7 @@ struct LoginScreenView: View {
             }
             .padding(.horizontal, 24)
         }
+        .toolbar(.hidden, for: .tabBar)
     }
 
     private var background: some View {

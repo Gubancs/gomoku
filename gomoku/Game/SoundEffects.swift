@@ -60,6 +60,14 @@ enum SoundEffects {
         }
     }
 
+    static func playClockTick() {
+        guard currentVolume() > 0 else { return }
+        soundQueue.async {
+            prepareIfNeededOnQueue()
+            scheduleTone(frequency: 1200, duration: 0.035, gain: 0.6)
+        }
+    }
+
     static func prepare() {
         soundQueue.async {
             prepareIfNeededOnQueue()
