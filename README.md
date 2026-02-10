@@ -11,16 +11,17 @@ A clean, modern **Gomoku (Five in a Row)** game for iOS with **online multiplaye
 - Minimal UI focused on strategy
 
 ## Screenshots
+<p align="center">
+  <img src="./docs/screenshots/IMG_6346_1242x2688.png" width="180" />
+  <img src="./docs/screenshots/IMG_6345_1242x2688.png" width="180" />
+  <img src="./docs/screenshots/IMG_6344_1242x2688.png" width="180" />
+</p>
 
-> Add screenshots/GIFs here (recommended).
->
-> Example:
-> - `./docs/screenshots/IMG_6346_1242x2688.png`
-> - `./docs/screenshots/IMG_6345_1242x2688.png`
-> - `./docs/screenshots/IMG_6344_1242x2688.png`
-> - `./docs/screenshots/IMG_6343_1242x2688.png`
-> - `./docs/screenshots/IMG_6342_1242x2688.png`
-> - `./docs/screenshots/IMG_6341_1242x2688.png`
+<p align="center">
+  <img src="./docs/screenshots/IMG_6343_1242x2688.png" width="180" />
+  <img src="./docs/screenshots/IMG_6342_1242x2688.png" width="180" />
+  <img src="./docs/screenshots/IMG_6341_1242x2688.png" width="180" />
+</p>
 
 ## Requirements
 
