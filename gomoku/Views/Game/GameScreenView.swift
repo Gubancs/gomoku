@@ -214,6 +214,10 @@ struct GameScreenView: View {
             ToolbarItemGroup(placement: .navigationBarTrailing) {
                 soundToggleButton
 
+                if isOnlineSession, let opponentID = onlineOpponentPlayerID, !opponentID.isEmpty {
+                    addFriendButton(opponentID: opponentID)
+                }
+
                 NavigationLink {
                     SettingsView(symbolsLocked: !isGameOver)
                 } label: {
@@ -241,6 +245,32 @@ struct GameScreenView: View {
         .buttonStyle(.plain)
         .controlSize(.mini)
         .accessibilityLabel(isSoundEnabled ? "Disable sounds" : "Enable sounds")
+    }
+
+    private var onlineOpponentPlayerID: String? {
+        guard let match = gameCenter.currentMatch else { return nil }
+        let localID = GKLocalPlayer.local.gamePlayerID
+        return match.participants.first { $0.player?.gamePlayerID != localID && $0.player != nil }?.player?.gamePlayerID
+    }
+
+    private func addFriendButton(opponentID: String) -> some View {
+        let hasSent = gameCenter.outgoingFriendRequestPlayerIDs.contains(opponentID)
+        let opponentPlayer = gameCenter.currentMatch?.participants.first(where: { $0.player?.gamePlayerID == opponentID })?.player
+        return Button {
+            guard !hasSent else { return }
+            gameCenter.sendFriendRequest(to: opponentID, displayName: opponentPlayer?.displayName ?? "")
+        } label: {
+            Image(systemName: hasSent ? "person.badge.plus.fill" : "person.badge.plus")
+                .font(.system(size: 14, weight: .semibold))
+                .symbolRenderingMode(.hierarchical)
+        }
+        .buttonStyle(.plain)
+        .controlSize(.mini)
+        .disabled(hasSent)
+        .accessibilityLabel(hasSent ? "Friend request sent" : "Send friend request")
+        .onAppear {
+            gameCenter.checkOutgoingFriendRequest(to: opponentID)
+        }
     }
 
     private func boardScroller(height: CGFloat) -> some View {

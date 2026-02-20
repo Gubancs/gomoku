@@ -40,6 +40,8 @@ final class GameCenterManager: NSObject, ObservableObject {
     @Published var incomingRematchMatchID: String?
     @Published var incomingRematchRequesterName: String?
     @Published var isHandlingIncomingRematch: Bool = false
+    @Published var pendingFriendRequests: [FriendRequest] = []
+    @Published var outgoingFriendRequestPlayerIDs: Set<String> = []
 
     let leaderboardID: String
 
@@ -53,6 +55,7 @@ final class GameCenterManager: NSObject, ObservableObject {
     let headToHeadStore = HeadToHeadCloudKitStore()
     let presenceStore = PresenceCloudKitStore()
     let rematchStore = RematchCloudKitStore()
+    let friendRequestStore = FriendRequestCloudKitStore()
     var shouldPresentAuthUI: Bool = false
     var pendingAuthViewController: UIViewController?
     var pendingAutoMatchID: String?
@@ -154,6 +157,7 @@ final class GameCenterManager: NSObject, ObservableObject {
                     self.startPresenceHeartbeat()
                     self.loadMatches()
                     self.refreshLeaderboard()
+                    self.pollFriendRequests()
                 } else {
                     self.stopMatchStatusPolling()
                     self.stopInboxPolling()
@@ -162,6 +166,8 @@ final class GameCenterManager: NSObject, ObservableObject {
                     self.rematchSyncTask = nil
                     self.incomingRematchMatchID = nil
                     self.incomingRematchRequesterName = nil
+                    self.pendingFriendRequests = []
+                    self.outgoingFriendRequestPlayerIDs = []
                 }
             }
         }
@@ -1507,6 +1513,7 @@ final class GameCenterManager: NSObject, ObservableObject {
                 guard !self.isFindingMatch else { return }
                 guard !self.isAwaitingRematch else { return }
                 self.loadMatches()
+                self.pollFriendRequests()
             }
         }
 

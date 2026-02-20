@@ -11,6 +11,7 @@ struct OnlineScreenView: View {
     @State private var isJoinPartyPresented: Bool = false
     @State private var isLeaderboardsPresented: Bool = false
     @State private var isFinishedMatchesPresented: Bool = false
+    @State private var isFriendRequestsPresented: Bool = false
     @State private var joinPartyCode: String = ""
     @State private var presenceCount: Int?
     @FocusState private var isJoinCodeFieldFocused: Bool
@@ -66,6 +67,24 @@ struct OnlineScreenView: View {
                     .lineLimit(1)
             }
             ToolbarItemGroup(placement: .navigationBarTrailing) {
+                if !gameCenter.pendingFriendRequests.isEmpty {
+                    Button {
+                        isFriendRequestsPresented = true
+                    } label: {
+                        ZStack(alignment: .topTrailing) {
+                            Image(systemName: "person.2.fill")
+                                .font(.system(size: 14, weight: .semibold))
+                                .symbolRenderingMode(.hierarchical)
+                            Circle()
+                                .fill(Color.red)
+                                .frame(width: 8, height: 8)
+                                .offset(x: 4, y: -4)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .controlSize(.mini)
+                    .accessibilityLabel("Friend requests (\(gameCenter.pendingFriendRequests.count))")
+                }
                 Button {
                     isFinishedMatchesPresented = true
                 } label: {
@@ -83,6 +102,13 @@ struct OnlineScreenView: View {
                     .environmentObject(gameCenter)
                     .environmentObject(offlinePlayers)
             }
+        }
+        .sheet(isPresented: $isFriendRequestsPresented) {
+            NavigationStack {
+                friendRequestsSheet
+            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $isJoinPartyPresented) {
             NavigationStack {
@@ -173,6 +199,65 @@ struct OnlineScreenView: View {
 
     private var header: some View {
         EmptyView()
+    }
+
+    private var friendRequestsSheet: some View {
+        List {
+            Section {
+                if gameCenter.pendingFriendRequests.isEmpty {
+                    Text("No pending friend requests.")
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .listRowBackground(Color.clear)
+                } else {
+                    ForEach(gameCenter.pendingFriendRequests) { request in
+                        let displayName = request.senderName.isEmpty ? "Unknown Player" : request.senderName
+                        HStack(spacing: 12) {
+                            Image(systemName: "person.crop.circle.fill")
+                                .font(.system(size: 36))
+                                .foregroundStyle(.secondary)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(displayName)
+                                    .font(.headline)
+                                Text("Wants to be your friend")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Spacer(minLength: 0)
+
+                            HStack(spacing: 8) {
+                                Button {
+                                    gameCenter.rejectFriendRequest(request)
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.system(size: 28))
+                                        .foregroundStyle(Color.red.opacity(0.85))
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Decline friend request from \(displayName)")
+
+                                Button {
+                                    gameCenter.acceptFriendRequest(request)
+                                } label: {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .font(.system(size: 28))
+                                        .foregroundStyle(Color.green.opacity(0.85))
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Accept friend request from \(displayName)")
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+            } header: {
+                Text("Friend Requests")
+            }
+        }
+        .navigationTitle("Friend Requests")
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     private var joinByCodeSheet: some View {
